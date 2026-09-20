@@ -212,12 +212,18 @@ export function Descent({ friendId, depth, tier, rooms, phase, pot, carried, pee
       <div className="deeper-torch" style={{ "--burn": `${100 - depth * 7}%` } as CSSProperties} />
       {satchel}
       <FriendSprite friendId={friendId} facing="down" walking={phase === "entering"} reducedMotion={reducedMotion} />
-      {phase === "entering" && <p className="deeper-entering">Entering room {depth + 1}…</p>}
+      {phase === "entering" && <p className="deeper-entering">
+        <span className="deeper-plate">Entering room {depth + 1}…</span>
+      </p>}
+      {/* The verdict is read against whatever the room happens to look like, and the bands range
+          from near-black to lit orange. It carries its own ground rather than trusting the art. */}
       {last && phase !== "entering" && <p className={`deeper-verdict deeper-verdict-${last.kind}`} aria-hidden="true">
-        {VERDICT[last.kind]}
-        <small>{last.kind === "trap" ? "The dark keeps the pot."
-          : last.kind === "loot" ? `Pot is now ${rf(potFor(last.tier, carried))}.`
-            : last.drop ? `Nothing here but a ${itemFor(last.drop).name} in the rubble.` : "Nothing here. The pot holds."}</small>
+        <span className="deeper-plate">
+          {VERDICT[last.kind]}
+          <small>{last.kind === "trap" ? "The dark keeps the pot."
+            : last.kind === "loot" ? `Pot is now ${rf(potFor(last.tier, carried))}.`
+              : last.drop ? `Nothing here but a ${itemFor(last.drop).name} in the rubble.` : "Nothing here. The pot holds."}</small>
+        </span>
       </p>}
       {/* One region that outlives its own content: a live region mounted with its text already
           in place is not reliably announced. */}
@@ -300,8 +306,8 @@ export function Descent({ friendId, depth, tier, rooms, phase, pot, carried, pee
         <p className="deeper-odds">
           {atFloor ? "The dungeon floor. There is nowhere deeper to go."
             : peeked ? <>The Lantern shows room {nextDepth}: <b className={`deeper-peek-${peeked}`}>{VERDICT[peeked]}</b>.
-              {peeked === "loot" ? ` Loot takes the pot to ${rf(nextPot)}.` : peeked === "trap" ? " Walk in and it ends you." : " Nothing down there but the depth."}</>
-            : <>Room {nextDepth} is a <b>{next.trapBps / 100}%</b> trap. Loot takes the pot to <b>{rf(nextPot)}</b>.</>}
+              {peeked === "loot" ? ` Loot pushes the pot to ${rf(nextPot)}.` : peeked === "trap" ? " Walk in and it ends you." : " Nothing down there but the depth."}</>
+            : <>Room {nextDepth}: <b>{(10000 - next.trapBps) / 100}%</b> clear. Loot pushes the pot to <b>{rf(nextPot)}</b>.</>}
         </p>
         <div className="deeper-buttons">
           <button type="button" className="deeper-bank" disabled={!canAct || tier === 0} onClick={onBank}>
