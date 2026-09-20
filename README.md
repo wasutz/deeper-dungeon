@@ -246,6 +246,60 @@ drop-item   = sha256(nonce + ":" + playId + ":" + depth + ":drop-item")   which 
 The Verify panel prints all of them once the run is over, so the two draws that hand out curios are
 checkable by hand like every other.
 
+### Checking it without taking the game's word
+
+Everything the Verify panel shows was computed by the game, with the game's own SHA-256. That is a
+weak kind of proof, so there is a second one that shares no code with it:
+
+```sh
+npm run verify -- --nonce 0314… --play 7 --commitment 1185… --carried greed-idol
+```
+
+`scripts/verify.mjs` imports nothing from `game/`. The digest comes from `node:crypto` rather than
+`fairness.ts`, and the room boundaries are read straight out of `game.json` rather than `rules.ts`,
+so when it reproduces the run the agreement is evidence rather than a tautology. It re-derives every
+room and every tagged draw hanging off it — including the `reroll-drop` pair a Lucky Charm's reroll
+makes when it lands on an empty room — and checks `sha256(nonce)` against the commitment you were
+shown before room 1, exiting non-zero and printing no rooms at all if they disagree. It refuses
+malformed input rather than printing a confident table for a mistyped command. The **Fair play** panel prints the exact command for the
+run you are looking at.
+
+What that proves: every room was a pure function of `(nonce, playId, depth)`, fixed before your
+first choice, so no result could react to a bank-or-descend decision. What it does not prove: that
+the nonce was drawn fairly. In this preview your own browser draws it, so there is no house on the
+other side — running the same scheme against a contract is what turns this from a demonstration into
+a trust guarantee.
+
+### The other half: does the table match itself?
+
+A commitment proves one run was dealt before it was played. It says nothing about whether the
+published weights are the weights actually being used. The **Fair play** panel answers that over a
+whole session: it tallies every room draw against what `game.json` expected of it and reports
+Pearson's chi-square on two degrees of freedom, with the p=0.01 band at 9.21. A table that lied
+would drift away from its own numbers there, and a player can watch it fail to.
+
+It counts the **natural** result of each draw, not the resolved one — a curio overrides what a roll
+means, never the roll, so the overridden rooms still belong in the calibration. A Lantern's peek is
+tallied when it is drawn rather than when the room is entered: a peek that talks you out of
+descending would otherwise drop its own draw, and a draw included only when the player liked the
+look of it is exactly the bias a goodness-of-fit test cannot survive.
+
+Three honest limits, stated in the panel as well as here:
+
+- **It cannot catch a dishonest operator, because there isn't one.** Same caveat as the verifier:
+  the draws and the weights both come out of the bundle running in your browser. This catches a bug
+  in `rules.ts` drifting from the published table — not a house, which does not exist until this
+  runs against a contract.
+- **The bands are approximate.** Every draw comes from its own depth's weights rather than one
+  shared distribution, so the statistic is Poisson-binomial rather than multinomial. The
+  heterogeneity makes it *conservative* — it errs towards calling an honest table honest.
+- **Watching continuously is not the same as one reading.** The panel recomputes after every room,
+  and a statistic you can check at any moment crosses a band more often than its fixed-sample
+  false-alarm rate suggests.
+
+The small-sample guard is the minimum expected cell count reaching 5, not a total draw count —
+`empty` is a flat 1500 bps at every depth, so it is always the cell that gets there last.
+
 The Greed Idol shifts the boundaries rather than the roll: +10 points of trap taken out of loot and
 empty in proportion, so the three still total 10 000 bps at every depth and the published bands stay
 checkable.
@@ -295,12 +349,13 @@ adapter, deployment flow, on-chain action or Solidity is implemented here.
 ```sh
 npm ci
 npm run typecheck
-npm test                 # digest, draws, room boundaries and every curio effect
+npm test                 # digest, draws, room boundaries, curio effects, the verifier
 npm run check:games      # definition, weights, roll boundaries, economy and item prices
 npx playwright install --with-deps chromium
 npm run check:browser    # end-to-end, 1100 px and 360 px
 npm run tuning           # the full economy table
 npm run items            # curio prices, pair overlaps and the strongest legal loadout
+npm run verify -- --nonce <hex> --play <id> [--commitment <hex>] [--carried greed-idol]
 ```
 
 `scripts/check-browser.mjs` drives the real runner with the SDK's mocked wallet, identity and canonical
@@ -336,12 +391,14 @@ submission, which resolves the SDK through `node_modules`.
 | `game/style.css` | Cavern palette, descent layout, responsive rules |
 | `scripts/tuning.mjs` | Economy solver and verifier |
 | `scripts/items.mjs` | Carry-item solver: prices, pair overlaps, drop weights |
+| `scripts/verify.mjs` | Independent run verification: `node:crypto`, imports nothing from `game/` |
 | `scripts/check-game.mjs` | Definition, weight and roll-boundary validation |
 | `scripts/check-browser.mjs` | End-to-end browser check |
 | `scripts/fixture.mjs` | The SDK's wallet/RPC fixture, vendored for the browser check |
 | `scripts/build-sdk.mjs` | Builds the git-installed SDK on `postinstall` |
 | `tests/fairness.test.mjs` | Digest, draw and room-boundary tests |
 | `tests/items.test.mjs` | Curio effects, tagged reroll and drop draws, carry-slot rules |
+| `tests/verify.test.mjs` | Holds the independent verifier to the shipped resolver |
 
 ## Assets
 

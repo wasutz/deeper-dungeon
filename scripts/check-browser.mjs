@@ -314,11 +314,23 @@ try {
     await child.getByRole("button", { name: "Back to the ledge", exact: true }).click().catch(() => undefined);
     await worldReady();
 
-    // Session history and accessibility controls.
+    // Fair play: the statistical half over the session, and the per-run proof it drills into.
     await child.getByRole("button", { name: /^Best depth/ }).click();
-    assert.match(await child.locator(".rf-frame-menu").textContent(), /Best depth/);
+    const fair = await child.locator(".rf-frame-menu").textContent();
+    assert.match(fair, /Best depth/);
+    assert.match(fair, /chi-square is \d+\.\d+ on two degrees of freedom/, "The session calibration is reported");
+    assert.match(fair, /trap/, "Draws are tallied against what the weights expected");
     await gameBounds(child);
-    await button("Close This session").click();
+
+    // Drilling into one run offers the command that rechecks it without the game's own digest.
+    await child.getByRole("button", { name: "Verify", exact: true }).first().click();
+    const command = await child.locator(".rf-frame-menu").textContent();
+    assert.match(command, /npm run verify -- --nonce [0-9a-f]+ --play \d+ --commitment [0-9a-f]{64}/,
+      "The panel prints a runnable independent verification command");
+    await gameBounds(child);
+    await button("Back to fair play").click();
+    assert.match(await child.locator(".rf-frame-menu").textContent(), /Best depth/, "and returns to the session view");
+    await button("Close Fair play").click();
     await child.getByRole("button", { name: /^Menu/ }).click();
     assert.equal(await child.getByLabel("Reduce motion").isChecked(), true, "Reduced motion is honoured from the OS preference");
     const sound = button("Sound");
@@ -336,7 +348,7 @@ try {
     await page.screenshot({ path: join(tmpdir(), `friendsdk-deeper-${width}.png`) });
     assert.deepEqual(errors, [], "No uncaught page errors");
     await context.close();
-    console.log(`PASS Deeper ${width}px: canonical artwork, keyboard/touch, vendor purchase, committed descent, bank/bust, run again, verification, satchel, curio shelf and loadout, an overridden room, mute/reduced motion, container bounds.`);
+    console.log(`PASS Deeper ${width}px: canonical artwork, keyboard/touch, vendor purchase, committed descent, bank/bust, run again, verification, satchel, curio shelf and loadout, an overridden room, session calibration and the independent verify command, mute/reduced motion, container bounds.`);
   }
 } finally {
   await browser?.close();

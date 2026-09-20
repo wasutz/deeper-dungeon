@@ -26,7 +26,7 @@ import "./style.css";
 const rf = (value: bigint) => `${formatGameAmount(value, 18)} RF`;
 const ROOM_REVEAL_MS = 760;
 
-type Menu = "vendor" | "entrance" | "satchel" | "settings" | "odds" | "verify" | "runs" | "ledger" | "items" | null;
+type Menu = "vendor" | "entrance" | "satchel" | "settings" | "odds" | "proof" | "ledger" | "items" | null;
 
 type Run = Readonly<{
   playId: bigint; nonce: string; commitment: string; rooms: readonly Room[];
@@ -46,8 +46,41 @@ type RunRecord = Readonly<{
 type Proof = Readonly<{
   commitment: string; nonce: string | null; playId: bigint; rooms: readonly Room[]; carried: Carried;
 }>;
+/**
+ * A proof whose run is over. Nothing that needs the nonce may take a plain `Proof`: publishing one
+ * mid-run would let the player hash the rooms below and stop one short of every trap, which is the
+ * whole game. Narrowing the field is not enough -- the object has to carry the guarantee.
+ */
+type Revealed = Proof & Readonly<{ nonce: string }>;
+const revealed = (proof: Proof | null): Revealed | null =>
+  proof && proof.nonce !== null ? { ...proof, nonce: proof.nonce } : null;
 type Totals = Readonly<{ runs: number; banked: bigint; bestDepth: number; bestPot: bigint }>;
 const NO_TOTALS: Totals = { runs: 0, banked: 0n, bestDepth: 0, bestPot: 0n };
+
+/**
+ * Every room draw this session, against what the published weights expected of it. The commitment
+ * proves one run was dealt before it was played; this is the other half of the same question,
+ * answered over a whole session -- a table that lied would drift away from its own numbers here.
+ */
+type Tally = Readonly<{ seen: Record<RoomKind, number>; expected: Record<RoomKind, number> }>;
+const NO_TALLY: Tally = { seen: { trap: 0, loot: 0, empty: 0 }, expected: { trap: 0, loot: 0, empty: 0 } };
+
+const observed = (tally: Tally, depth: number, carried: Carried, kind: RoomKind): Tally => {
+  const odds = oddsFor(depth, carried);
+  return {
+    seen: { ...tally.seen, [kind]: tally.seen[kind] + 1 },
+    expected: {
+      trap: tally.expected.trap + odds.trapBps / 10_000,
+      loot: tally.expected.loot + odds.lootBps / 10_000,
+      empty: tally.expected.empty + odds.emptyBps / 10_000,
+    },
+  };
+};
+
+/** Pearson's chi-square over the three room kinds. Two degrees of freedom. */
+const chiSquare = (tally: Tally) => (["trap", "loot", "empty"] as const)
+  .reduce((total, kind) => total + (tally.expected[kind] === 0 ? 0
+    : (tally.seen[kind] - tally.expected[kind]) ** 2 / tally.expected[kind]), 0);
 
 const held = (stock: Stock, id: ItemId) => stock[id] ?? 0;
 const restock = (stock: Stock, id: ItemId, by: number): Stock => ({ ...stock, [id]: held(stock, id) + by });
@@ -73,6 +106,7 @@ export default function Deeper({ friendId, client, paused }: GameComponentProps)
   const [loadout, setLoadout] = useState<Carried>([]);
   const [purse, setPurse] = useState(0n);
   const [peeked, setPeeked] = useState<Readonly<{ depth: number; kind: RoomKind }> | null>(null);
+  const [tally, setTally] = useState<Tally>(NO_TALLY);
 
   const motionChosen = useRef(false);
   const sound = useRef<FriendSoundKit | null>(null);
@@ -86,7 +120,7 @@ export default function Deeper({ friendId, client, paused }: GameComponentProps)
     sound.current = createFriendSoundKit({ muted: true });
     setSnapshot(null); setBacked(false); setMenu(null); setRun(null); setPhase("choice"); setSettlement(null); setUnsettled(null);
     setHistory([]); setTotals(NO_TOTALS); setVerifying(null); setError(""); setMessage(""); setBusy(false); setMuted(true);
-    setStock({}); setLoadout([]); setPurse(0n); setPeeked(null);
+    setStock({}); setLoadout([]); setPurse(0n); setPeeked(null); setTally(NO_TALLY);
     locked.current = false;
     runCount.current = 0;
     motionChosen.current = false;
@@ -227,6 +261,9 @@ export default function Deeper({ friendId, client, paused }: GameComponentProps)
       const room = peeked?.depth === drawn.depth
         ? { ...drawn, used: ["lantern" as ItemId, ...drawn.used] } : drawn;
       const carried = room.used.reduce<Carried>((rest, id) => spend(rest, id), run.carried);
+      if (!peeked || peeked.depth !== room.depth) {
+        setTally(current => observed(current, room.depth, run.carried, room.natural));
+      }
       const next: Run = { ...run, rooms: [...run.rooms, room], depth: room.depth, tier: room.tier, carried };
       setRun(next);
       settleRoom(next, room);
@@ -238,7 +275,12 @@ export default function Deeper({ friendId, client, paused }: GameComponentProps)
   const peek = useCallback(() => {
     if (!run || phase !== "choice" || busy || paused || !holds(run.carried, "lantern")) return;
     const depth = Math.min(run.depth + 1, MAX_DEPTH);
-    setPeeked({ depth, kind: peekRoom(run.nonce, run.playId, depth, run.carried) });
+    const kind = peekRoom(run.nonce, run.playId, depth, run.carried);
+    // Counted here rather than on entry. A peek that talks you out of descending would otherwise
+    // drop its own draw from the tally, and a draw included only when the player liked the look of
+    // it is exactly the bias a goodness-of-fit test cannot survive.
+    setTally(current => observed(current, depth, run.carried, kind));
+    setPeeked({ depth, kind });
     setRun({ ...run, carried: spend(run.carried, "lantern") });
     sound.current?.play("action-ready");
   }, [run, phase, busy, paused]);
@@ -268,6 +310,9 @@ export default function Deeper({ friendId, client, paused }: GameComponentProps)
     const carried = spend(run.carried, "lucky-charm");
     // A sprung trap left the tier untouched, so the reroll resolves against the tier still standing.
     const room = rerollRoom(sprung, run.nonce, run.playId, run.tier, run.carried);
+    // `kind` is the reroll's own natural result: nothing overrides a reroll. Give one an override
+    // and this needs its own `natural` alongside, or the tally starts counting bent results.
+    setTally(current => observed(current, room.depth, run.carried, room.kind));
     const next: Run = { ...run, rooms: [...run.rooms.slice(0, -1), room], tier: room.tier, carried };
     setRun(next);
     settleRoom(next, room);
@@ -343,6 +388,19 @@ export default function Deeper({ friendId, client, paused }: GameComponentProps)
   </table>;
 
   const runOver = phase === "busted" || phase === "banked";
+  const draws = tally.seen.trap + tally.seen.loot + tally.seen.empty;
+  const chi = chiSquare(tally);
+  const shown = revealed(verifying);
+  // Chi-square wants every expected cell at 5 or more, not merely a large total. Empty is a flat
+  // 1500 bps at every depth, so it is always the cell that gets there last.
+  const readable = Math.min(tally.expected.trap, tally.expected.loot, tally.expected.empty) >= 5;
+  // Only the Greed Idol changes the boundaries a roll is read against, so it is the only thing the
+  // independent verifier needs told about the loadout.
+  const verifyCommand = (proof: Revealed) => [
+    "npm run verify --", `--nonce ${proof.nonce}`, `--play ${proof.playId}`,
+    `--commitment ${proof.commitment}`,
+    ...(proof.carried.includes("greed-idol") ? ["--carried greed-idol"] : []),
+  ].join(" ");
   const proofOf = (source: Run | RunRecord, revealed: boolean): Proof => ({
     commitment: source.commitment, nonce: revealed ? source.nonce : null,
     playId: source.playId, rooms: source.rooms, carried: source.carried,
@@ -360,7 +418,7 @@ export default function Deeper({ friendId, client, paused }: GameComponentProps)
         <button type="button" className="deeper-chip" onClick={() => openMenu("satchel")}>
           <small>Satchel</small><strong>{caches.toString()}{owned.length > 0 && ` · ${owned.reduce((total, item) => total + held(stock, item.id), 0)}`}</strong>
         </button>
-        <button type="button" className="deeper-chip" onClick={() => openMenu("runs")}>
+        <button type="button" className="deeper-chip" onClick={() => openMenu("proof")}>
           <small>Best depth</small><strong>{totals.bestDepth || "—"}</strong>
         </button>
         <button type="button" className="deeper-chip" onClick={() => openMenu("settings")}><small>Menu</small><strong>⚙</strong></button>
@@ -377,7 +435,7 @@ export default function Deeper({ friendId, client, paused }: GameComponentProps)
       bestDepth={totals.bestDepth} settlement={runOver ? settlement : null}
       onDescend={descend} onPeek={peek} onBank={bank}
       onRope={useRope} onCharm={useCharm} onAccept={acceptTrap}
-      onVerify={() => { setVerifying(proofOf(run, runOver)); openMenu("verify"); }}
+      onVerify={() => { if (!busy && !paused) { setVerifying(proofOf(run, runOver)); openMenu("proof"); } }}
       onLedger={() => openMenu("ledger")} onRetrySettle={retrySettle}
       onAgain={repeatRun} onLeave={leaveDungeon} />}
 
@@ -395,7 +453,7 @@ export default function Deeper({ friendId, client, paused }: GameComponentProps)
           </button>)
         : undefined}
       title={menu === "vendor" ? "Torch Vendor" : menu === "entrance" ? "Dungeon Entrance" : menu === "satchel" ? "Satchel"
-        : menu === "odds" ? "Room odds" : menu === "verify" ? "Verify this run" : menu === "runs" ? "This session"
+        : menu === "odds" ? "Room odds" : menu === "proof" ? (verifying ? "Verify this run" : "Fair play")
         : menu === "ledger" ? "Pot and ledger" : menu === "items" ? "Curio shelf" : "Menu"}
       onClose={busy ? undefined : closeMenu}>
 
@@ -481,7 +539,7 @@ export default function Deeper({ friendId, client, paused }: GameComponentProps)
         <p>Optimal stopping banks <b>0.906 RF</b> of simulated pot per {rf(definition.price)} torch — a 9.4% edge — and
           runs bust 55.4% of the time. The cache the ledger actually settles each torch into is worth <b>0.912 RF</b> on
           average, an 8.8% edge.</p>
-      </> : menu === "verify" && verifying ? <>
+      </> : menu === "proof" && verifying ? <>
         <p>{FAIRNESS.note}</p>
         <p className="deeper-note"><code>{FAIRNESS.roomDraw}</code></p>
         <p className="deeper-note"><code>{FAIRNESS.roomOrder}</code></p>
@@ -514,13 +572,13 @@ export default function Deeper({ friendId, client, paused }: GameComponentProps)
           <table className="deeper-table">
             <thead><tr><th>Room</th><th>sha256(…:drop)</th><th>Roll</th><th>sha256(…:drop-item)</th><th>Left behind</th></tr></thead>
             <tbody>{verifying.rooms.filter(room => room.drop).map(room => {
-              const gate = drawRoom(verifying.nonce ?? "", verifying.playId, room.depth, "drop");
-              const pick = drawRoom(verifying.nonce ?? "", verifying.playId, room.depth, "drop-item");
+              const gate = shown && drawRoom(shown.nonce, shown.playId, room.depth, "drop");
+              const pick = shown && drawRoom(shown.nonce, shown.playId, room.depth, "drop-item");
               return <tr key={room.depth}>
                 <td>{room.depth}</td>
-                <td className="deeper-hash">{verifying.nonce ? `${gate.hash.slice(0, 12)}…` : "held"}</td>
-                <td>{verifying.nonce ? `${gate.roll} < ${ITEM_RULES.dropChanceBps}` : "—"}</td>
-                <td className="deeper-hash">{verifying.nonce ? `${pick.hash.slice(0, 12)}…` : "held"}</td>
+                <td className="deeper-hash">{gate ? `${gate.hash.slice(0, 12)}…` : "held"}</td>
+                <td>{gate ? `${gate.roll} < ${ITEM_RULES.dropChanceBps}` : "—"}</td>
+                <td className="deeper-hash">{pick ? `${pick.hash.slice(0, 12)}…` : "held"}</td>
                 <td>{itemFor(room.drop!).name}</td>
               </tr>;
             })}</tbody>
@@ -528,7 +586,45 @@ export default function Deeper({ friendId, client, paused }: GameComponentProps)
         </>}
         {verifying.carried.length > 0 && <p className="deeper-note">Carried: {verifying.carried.map(id => itemFor(id).name).join(", ")}.
           A curio can override what a roll resolves to; it never changes the roll, and both are printed above.</p>}
-      </> : menu === "runs" ? <>
+        {shown && <>
+          <p>Everything above was computed by this game. To check it without taking its word, recompute the run from
+            the revealed nonce with <code>node:crypto</code> instead:</p>
+          <p className="deeper-note"><code>{verifyCommand(shown)}</code></p>
+          <button type="button" onClick={() => {
+            void navigator.clipboard?.writeText(verifyCommand(shown))
+              .then(() => setMessage("Verification command copied."))
+              .catch(() => setMessage("Could not reach the clipboard — the command is printed above."));
+          }}>Copy the command</button>
+        </>}
+        <button type="button" onClick={() => setVerifying(null)}>Back to fair play</button>
+      </> : menu === "proof" ? <>
+        <p>Two ways to check this game is dealing straight. Per run, the commitment proves the rooms were fixed
+          before you chose anything. Across the session, the draws themselves should match the weights the table
+          publishes — a rigged table drifts away from its own numbers here.</p>
+
+        {draws === 0 ? <p className="deeper-note">No rooms entered yet. The calibration fills in as you play.</p> : <>
+          <table className="deeper-table">
+            <caption>Every committed draw this session — rooms and Lucky Charm rerolls — against what the
+              published weights expected of it.</caption>
+            <thead><tr><th>Result</th><th>Expected</th><th>Seen</th><th>Difference</th></tr></thead>
+            <tbody>{(["trap", "loot", "empty"] as const).map(kind => <tr key={kind}>
+              <td>{kind}</td>
+              <td>{tally.expected[kind].toFixed(1)}</td>
+              <td>{tally.seen[kind]}</td>
+              <td>{(tally.seen[kind] - tally.expected[kind] >= 0 ? "+" : "") + (tally.seen[kind] - tally.expected[kind]).toFixed(1)}</td>
+            </tr>)}</tbody>
+          </table>
+          <p>Over <b>{draws}</b> draws, chi-square is <b>{chi.toFixed(2)}</b> on two degrees of freedom.{" "}
+            {!readable ? "Too few draws to read yet — the smallest expected count has to reach 5 before the number means anything."
+              : chi < 9.21 ? "That sits inside the p=0.01 band of 9.21, which is what an honest table looks like."
+                : chi < 13.82 ? "That is outside the p=0.01 band of 9.21 but inside p=0.001. Unusual, not yet suspicious."
+                  : "That is outside even the p=0.001 band of 13.82 — worth a second look at the rooms themselves."}</p>
+          <p className="deeper-note">Read it loosely. Every draw comes from its own depth's weights rather than one
+            shared distribution, so the bands above are an approximation — a conservative one, which errs towards
+            calling an honest table honest. And because this recomputes after every room, watching it long enough
+            will cross a band more often than a single reading at a fixed count would suggest.</p>
+        </>}
+
         <p>Best depth <b>{totals.bestDepth || "—"}</b> · best bank <b>{rf(totals.bestPot)}</b> · banked this
           session <b>{rf(totals.banked)}</b> over {totals.runs} runs.</p>
         {history.length === 0 ? <p>No runs yet. Buy a torch and take the stairs.</p> : <table className="deeper-table">
@@ -539,7 +635,7 @@ export default function Deeper({ friendId, client, paused }: GameComponentProps)
             <td>{record.banked ? rf(record.pot) : "busted"}</td>
             <td>{record.settlement ? `${record.settlement.name} · ${rf(record.settlement.reward)}` : "—"}</td>
             <td><button type="button" className="deeper-link"
-              onClick={() => { setVerifying(proofOf(record, true)); setMenu("verify"); }}>Verify</button></td>
+              onClick={() => setVerifying(proofOf(record, true))}>Verify</button></td>
           </tr>)}</tbody>
         </table>}
       </> : menu === "ledger" ? <>
@@ -566,7 +662,7 @@ export default function Deeper({ friendId, client, paused }: GameComponentProps)
         <label><input type="checkbox" checked={reducedMotion}
           onChange={event => { motionChosen.current = true; setReducedMotion(event.target.checked); }} /> Reduce motion</label>
         <button type="button" onClick={() => openMenu("odds")}>Room odds</button>
-        <button type="button" onClick={() => openMenu("runs")}>This session</button>
+        <button type="button" onClick={() => openMenu("proof")}>Fair play</button>
         <p>All balances, purchases and rewards are simulated. Reloading resets the preview. Wallet connection and
           ownership verification belong to the SDK runtime.</p>
         <button type="button" onClick={() => openMenu("ledger")}>Pot and ledger</button>
