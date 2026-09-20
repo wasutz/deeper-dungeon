@@ -1,6 +1,6 @@
 # Deeper
 
-A push-your-luck dungeon crawler for FriendSDK **v0.1**. Your owned Rare Friend buys a torch on a
+A push-your-luck dungeon crawler for FriendSDK **v0.1.2**. Your owned Rare Friend buys a torch on a
 cavern ledge, takes the staircase, and clears rooms one at a time. After every safe room there is
 one question: **bank the pot, or go deeper.**
 
@@ -11,9 +11,9 @@ or a separate wallet flow.
 
 ## Run it
 
-Node.js 22+ and git on Linux or Ubuntu/WSL2, plus a browser wallet holding a hardwired Rare
-Friends Generations NFT (generation ≥ 1) on Robinhood mainnet (4663). `npm ci` clones the SDK from
-its repository and builds it, so the first install needs network access.
+Node.js 22+ and a browser wallet holding a hardwired Rare Friends Generations NFT
+(generation ≥ 1) on Robinhood mainnet (4663). `npm ci` downloads the SDK's published release
+archive, so the first install needs network access.
 
 ```sh
 git clone https://github.com/wasutz/deeper.git
@@ -336,7 +336,7 @@ against the published boundaries.
 
 **This is the one thing a reviewer should look at first.**
 
-SDK v0.1's chance primitive settles **one fixed reward per consumable**, chosen by its own weighted
+SDK v0.1.2's chance primitive settles **one fixed reward per consumable**, chosen by its own weighted
 draw (`src/game.ts`). There is no action that means *"pay the pot at the depth this player stopped"*,
 and credited rewards cannot be clawed back — so a payout that depends on the player's stop-depth is
 **not expressible** with the fixed outcome table. Push-your-luck fundamentally needs that.
@@ -347,7 +347,7 @@ link on every run-over screen opens the same explanation):
 - **Real, through the SDK client:** the 1 RF torch purchase (`buy`), the torch burn and run
   commitment (`play`), the 25 RF maximum-prize reserve, the per-run settlement (`settle`) and cache
   redemption (`redeem`). Free-stake backing and reserves behave exactly as the SDK enforces them.
-- **Simulated at the game layer:** the banked pot, and the curios it buys. SDK v0.1 has one
+- **Simulated at the game layer:** the banked pot, and the curios it buys. SDK v0.1.2 still ships one
   consumable and `buy` is its only RF debit, so a curio cannot be a second thing the ledger sells;
   pricing them in banked pot keeps the whole item economy inside the layer that is already labelled
   as simulated rather than opening a second gap.
@@ -379,16 +379,13 @@ a committed descent, bank or bust, the `paused` lock, one-tap restart, verificat
 the curio shelf and loadout picker, a room overridden by a Divining Rod, mute and reduced motion,
 and that nothing escapes the container or covers a control.
 
-The SDK is consumed straight from <https://github.com/spokesz/friendsdk>, pinned to commit
-`da4828f`, and needs no changes to the SDK. Upstream keeps `dist/` out of version control and
-defines no `prepare` script, which is the one lifecycle npm runs for a git dependency, so
-`scripts/build-sdk.mjs` builds the package in place on `postinstall` using the SDK's own
-devDependencies. One unrelated observation from building against a clone of the SDK repo, in case
-it is useful upstream: `scripts/check-games.mjs` allow-lists only `dist/`, `src/` and `node_modules/` as
-build sources, while `package.json` maps `./world-view.css` and `./frame.css` into `assets/`. A game
-developed *inside* the SDK repo under `games/` that imports an SDK stylesheet therefore fails that
-script, including a fresh `friendsdk init` copy of `examples/starter`. It does not affect this
-submission, which resolves the SDK through `node_modules`.
+The SDK is installed from its published release archive,
+[`rarefriends-friendsdk-0.1.2.tgz`](https://github.com/spokesz/friendsdk/releases/tag/v0.1.2), which
+ships the package prebuilt; `package-lock.json` pins its SHA-512. Nothing in the SDK is patched.
+`scripts/fixture.mjs` is the one piece of it this project vendors: the package exports the browser
+harness only as the whole `./testing` entry point, which builds and drives the page itself, and this
+check has to pin the run nonce before the runtime loads so the committed room sequence is identical
+on every run.
 
 ## Files
 
@@ -410,7 +407,6 @@ submission, which resolves the SDK through `node_modules`.
 | `scripts/check-game.mjs` | Definition, weight and roll-boundary validation |
 | `scripts/check-browser.mjs` | End-to-end browser check |
 | `scripts/fixture.mjs` | The SDK's wallet/RPC fixture, vendored for the browser check |
-| `scripts/build-sdk.mjs` | Builds the git-installed SDK on `postinstall` |
 | `tests/fairness.test.mjs` | Digest, draw and room-boundary tests |
 | `tests/items.test.mjs` | Curio effects, tagged reroll and drop draws, carry-slot rules |
 | `tests/verify.test.mjs` | Holds the independent verifier to the shipped resolver |

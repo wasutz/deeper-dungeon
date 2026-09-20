@@ -1,15 +1,18 @@
 // Wallet, identity and RPC fixture for the automated browser check.
 //
-// Copied verbatim from the SDK's own scripts/check-runtime-browser.mjs (FriendSDK v0.1.0,
-// upstream da4828f) so this project can run the same check without a checkout of the SDK repo.
-// Mock accounts are for automated tests only: the delivered prototype uses the runtime's real
-// ownership gate. Keep this file in step with the SDK's copy when the vendored tarball moves.
+// Copied from the SDK's own scripts/browser-fixture.mjs (FriendSDK v0.1.2, upstream 762d6f5,
+// Apache-2.0) so this project can run the same check without a checkout of the SDK repo; the
+// package exports only the whole `./testing` harness, which builds and drives the page itself
+// and so cannot pin this game's run nonce before the runtime loads. `assertBounds` is this
+// project's own: the SDK relaxed the frame ratio for custom layouts in v0.1.2, and Deeper still
+// commits to 3:2. Mock accounts are for automated tests only: the delivered prototype uses the
+// runtime's real ownership gate. Keep this file in step with the SDK's copy when the pin moves.
 import assert from "node:assert/strict";
 import { decodeFunctionData, encodeFunctionResult, encodeEventTopics, padHex, parseAbi, zeroAddress } from "viem";
 
-const OWNER = "0x1111111111111111111111111111111111111111";
-const SECOND_OWNER = "0x2222222222222222222222222222222222222222";
-const FRIEND_WALLET = "0x3333333333333333333333333333333333333333";
+export const OWNER = "0x1111111111111111111111111111111111111111";
+export const SECOND_OWNER = "0x2222222222222222222222222222222222222222";
+export const FRIEND_WALLET = "0x3333333333333333333333333333333333333333";
 const COLLECTION = "0x14C49e6118F46525dE9ab41a51cBAA3c6EBF181D";
 const ABI = parseAbi([
   "event Transfer(address indexed from, address indexed to, uint256 indexed tokenId)",
@@ -21,19 +24,24 @@ const ABI = parseAbi([
 const ownerId = owner => owner.toLowerCase() === OWNER.toLowerCase() ? 7730n : 3412n;
 const tokenOwner = id => id === 7730n ? OWNER : SECOND_OWNER;
 
-export async function installFixture(page, origin, { artworkCall } = {}) {
-  const state = { mode: "eligible", requests: [], ownerReads: 0, hold: null, release: null };
-  await page.addInitScript(({ owner }) => {
+export async function installFixture(page, origin, { artworkCall, initialChain = "0x1237" } = {}) {
+  const state = { mode: "eligible", requests: [], ownerReads: 0, hold: null, release: null, errors: [] };
+  await page.addInitScript(({ owner, initialChain }) => {
     // Internal automation is the only place an account/identity may be mocked.
     const listeners = new Map();
-    const state = { accounts: [], chainId: "0x1237", requests: [] };
+    const state = { accounts: [], chainId: initialChain, requests: [], switchError: null };
     const emit = (event, value) => { for (const listener of listeners.get(event) ?? []) listener(value); };
     window.ethereum = {
-      async request({ method }) {
+      async request({ method, params }) {
         state.requests.push(method);
         if (method === "eth_accounts") return state.accounts;
         if (method === "eth_requestAccounts") { state.accounts = [owner]; return state.accounts; }
         if (method === "eth_chainId") return state.chainId;
+        if (method === "wallet_switchEthereumChain") {
+          if (state.switchError) throw { code: state.switchError };
+          if (params[0].chainId !== "0x1237") throw new Error("Switch only to Robinhood");
+          state.chainId = params[0].chainId; emit("chainChanged", state.chainId); return null;
+        }
         throw new Error(`Unexpected signing or wallet method: ${method}`);
       },
       on(event, listener) { if (!listeners.has(event)) listeners.set(event, new Set()); listeners.get(event).add(listener); },
@@ -47,7 +55,7 @@ export async function installFixture(page, origin, { artworkCall } = {}) {
     };
     const random = crypto.getRandomValues.bind(crypto);
     crypto.getRandomValues = array => array instanceof Uint32Array && array.length === 1 ? (array[0] = 1500, array) : random(array);
-  }, { owner: OWNER });
+  }, { owner: OWNER, initialChain });
 
   async function answer(request) {
     state.requests.push(request);
@@ -89,19 +97,23 @@ export async function installFixture(page, origin, { artworkCall } = {}) {
     return { jsonrpc: "2.0", id: request.id, result };
   }
   await page.route("**/*", async route => {
-    const url = route.request().url();
-    if (url.startsWith(origin) || url.startsWith("blob:") || url.startsWith("data:")) return route.continue();
-    assert.equal(new URL(url).hostname, "rpc.mainnet.chain.robinhood.com", "No external app, indexer key or developer service is required");
-    if (route.request().method() === "OPTIONS") return route.fulfill({ status: 204, headers: {
-      "access-control-allow-origin": "*", "access-control-allow-methods": "POST,OPTIONS", "access-control-allow-headers": "content-type",
-    } });
-    const request = route.request().postDataJSON();
-    const response = Array.isArray(request) ? await Promise.all(request.map(answer)) : await answer(request);
-    return route.fulfill({ json: response, headers: { "access-control-allow-origin": "*" } });
+    try {
+      const url = new URL(route.request().url());
+      if (url.origin === origin || ["blob:", "data:"].includes(url.protocol)) return route.continue();
+      assert.equal(url.origin, "https://rpc.mainnet.chain.robinhood.com", "Automated tests cannot access external services");
+      if (route.request().method() === "OPTIONS") return route.fulfill({ status: 204, headers: {
+        "access-control-allow-origin": "*", "access-control-allow-methods": "POST,OPTIONS", "access-control-allow-headers": "content-type",
+      } });
+      const request = route.request().postDataJSON();
+      const response = Array.isArray(request) ? await Promise.all(request.map(answer)) : await answer(request);
+      return route.fulfill({ json: response, headers: { "access-control-allow-origin": "*" } });
+    } catch (error) {
+      state.errors.push(error.message);
+      await route.abort("blockedbyclient");
+    }
   });
   return state;
 }
-
 export async function assertBounds(page) {
   assert.deepEqual(await page.evaluate(() => {
     const frame = document.querySelector(".rf-game-frame"), problems = [];

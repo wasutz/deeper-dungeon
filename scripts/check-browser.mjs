@@ -15,7 +15,7 @@ import { chromium } from "playwright";
 import { decodeFunctionData, encodeFunctionResult } from "viem";
 import { FAMILIES_REGISTRY_ABI, GENERATION_SPRITE_MANIFEST } from "@rarefriends/friendsdk/sprites";
 import { project } from "@rarefriends/friendsdk/world";
-import { buildGame, createGameServer } from "../node_modules/@rarefriends/friendsdk/scripts/dev-game.mjs";
+import { buildGame, createGameServer } from "@rarefriends/friendsdk/build";
 import { installFixture, assertBounds } from "./fixture.mjs";
 
 const source = await readFile(new URL("../node_modules/@rarefriends/friendsdk/examples/fishing/sample-sprites.ts", import.meta.url), "utf8");
@@ -76,7 +76,7 @@ try {
     const context = await browser.newContext({ viewport: { width, height: 800 }, hasTouch: width < 500, reducedMotion: "reduce" });
     const page = await context.newPage(), errors = [];
     page.on("pageerror", error => errors.push(error.message));
-    await installFixture(page, origin, { artworkCall });
+    const fixture = await installFixture(page, origin, { artworkCall });
     // Pin the run nonce so the committed room sequence is identical on every run of this check.
     await page.addInitScript(() => {
       const random = crypto.getRandomValues.bind(crypto);
@@ -395,7 +395,7 @@ try {
 
     await assertBounds(page);
     await page.screenshot({ path: join(tmpdir(), `friendsdk-deeper-${width}.png`) });
-    assert.deepEqual(errors, [], "No uncaught page errors");
+    assert.deepEqual([...errors, ...fixture.errors], [], "No uncaught page errors or blocked fixture requests");
     await context.close();
     console.log(`PASS Deeper ${width}px: canonical artwork, keyboard/touch, walk-over interaction, vendor purchase, committed descent, bank/bust, run again, verification, satchel, curio shelf and loadout, an overridden room, session calibration and the independent verify command, mute/reduced motion, container bounds.`);
   }
