@@ -98,6 +98,10 @@ try {
       return true;
     };
     const worldReady = () => child.locator("canvas[data-x]").waitFor();
+    // A sign out of reach is `disabled` and taken out of the hit test so the tap can reach the
+    // canvas, which is exactly what a real tap does -- so the click is forced, and lands on the
+    // canvas at the sign's own coordinates where the game hit-tests it by rect.
+    const walkOver = name => child.getByRole("button", { name }).click({ force: true });
     const walk = async point => {
       const canvas = child.locator(".rf-world-view canvas"), box = await canvas.boundingBox(), [x, y] = project(...point);
       const position = { x: (x - 320) / 960 * box.width, y: (y - 330) / 640 * box.height };
@@ -125,8 +129,27 @@ try {
       assert.notEqual(await canvas.getAttribute("data-x"), beforeTouch, "Tap movement works inside the scaled container");
     }
 
-    // Torch vendor: walk to the stall, buy one simulated torch.
+    // The hit area is the sign itself and nothing wider: ground inside an interaction's reach is
+    // still plain floor, so tapping it walks there and opens nothing.
     await walk([196, 179]);
+    await page.waitForTimeout(900);
+    assert.equal(await child.getByRole("button", { name: "Close Torch Vendor", exact: true }).count(), 0,
+      "Ground beside the stall is walkable floor, not a hit target");
+    assert.equal(await child.getByRole("button", { name: /^Torch Vendor/ }).isDisabled(), false,
+      "though that walk did arrive in reach of it");
+
+    // Hovering a sign has to be driven by the same hit test the tap uses: an out-of-reach sign is
+    // taken out of pointer events, so `:hover` never fires on it.
+    if (width > 500) {
+      const far = child.getByRole("button", { name: /^Dungeon Entrance/ });
+      const box = await far.boundingBox();
+      await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+      assert.equal(await far.getAttribute("data-hovered"), "", "A sign out of reach still lights up under the cursor");
+      await page.mouse.move(box.x + box.width / 2, box.y - 80);
+      assert.equal(await far.getAttribute("data-hovered"), null, "and goes out again when the cursor leaves it");
+    }
+
+    // Torch vendor: buy one simulated torch.
     await child.getByRole("button", { name: /^Torch Vendor/ }).click();
     await button("Buy a torch · 1 RF").click();
     await confirm();
@@ -135,9 +158,27 @@ try {
     await button("Close Torch Vendor").click();
     assert.match(await child.locator(".deeper-hud").textContent(), /19 RF/);
 
-    // Staircase: light the torch and commit the run.
-    await walk([452, 205]);
-    await child.getByRole("button", { name: /^Dungeon Entrance/ }).click();
+    // Taking the controls back abandons a queued walk: the menu must not open behind the player.
+    // Aimed at the staircase from the vendor's stall, so the Friend is still crossing the ledge.
+    assert.equal(await child.getByRole("button", { name: /^Dungeon Entrance/ }).isDisabled(), true,
+      "The staircase is out of reach from the stall");
+    await walkOver(/^Dungeon Entrance/);
+    await child.locator(".deeper-world[data-approaching='staircase']").waitFor();
+    await child.locator(".rf-world-view canvas").press("ArrowUp");
+    assert.equal(await child.locator(".deeper-world[data-approaching]").count(), 0, "Steering by hand drops the approach");
+    await page.waitForTimeout(1500);
+    assert.equal(await child.getByRole("button", { name: "Close Dungeon Entrance", exact: true }).count(), 0,
+      "An abandoned approach never opens its menu");
+
+    // Staircase: tapping its sign from across the ledge walks the Friend over and opens it on
+    // arrival, with no second tap once he gets there. Then light the torch and commit the run.
+    await walkOver(/^Dungeon Entrance/);
+    await child.getByRole("button", { name: "Close Dungeon Entrance", exact: true }).waitFor();
+    // Arrival means standing at the stairs, not touching the edge of their 92-unit reach.
+    const at = await child.locator(".rf-world-view canvas")
+      .evaluate(node => [Number(node.dataset.x), Number(node.dataset.y)]);
+    const short = Math.hypot(at[0] - 404, at[1] - 208);
+    assert.ok(short < 45, `The menu waited for the Friend to arrive, not to enter reach (opened ${short.toFixed(1)} away)`);
     await button("Light a torch and descend").click();
     await confirm();
     await child.locator(".deeper-descent").waitFor();
@@ -240,12 +281,11 @@ try {
 
     // Curios: bought with banked pot, carried into a run, spent by it.
     const purse = async () => Number((await child.locator(".deeper-hud").textContent()).match(/Banked([\d.]+) RF/)?.[1] ?? 0);
-    // The Friend may already be standing on the rim, in which case its prompt covers the canvas
-    // and a walk tap would land on the prompt instead of the ground.
+    // Whether the Friend is on the rim already or across the ledge, the sign is the same target:
+    // in reach it opens on its own click, out of reach it walks him over and opens on arrival.
     const enterDungeon = async () => {
-      const prompt = child.getByRole("button", { name: /^Dungeon Entrance/ });
-      if (!await prompt.isEnabled().catch(() => false)) await walk([452, 205]);
-      await prompt.click();
+      await walkOver(/^Dungeon Entrance/);
+      await child.getByRole("button", { name: "Close Dungeon Entrance", exact: true }).waitFor();
       await gameBounds(child);
     };
     // Bank whatever a run offers as soon as it offers anything; the curio shelf needs a purse.
@@ -348,7 +388,7 @@ try {
     await page.screenshot({ path: join(tmpdir(), `friendsdk-deeper-${width}.png`) });
     assert.deepEqual(errors, [], "No uncaught page errors");
     await context.close();
-    console.log(`PASS Deeper ${width}px: canonical artwork, keyboard/touch, vendor purchase, committed descent, bank/bust, run again, verification, satchel, curio shelf and loadout, an overridden room, session calibration and the independent verify command, mute/reduced motion, container bounds.`);
+    console.log(`PASS Deeper ${width}px: canonical artwork, keyboard/touch, walk-over interaction, vendor purchase, committed descent, bank/bust, run again, verification, satchel, curio shelf and loadout, an overridden room, session calibration and the independent verify command, mute/reduced motion, container bounds.`);
   }
 } finally {
   await browser?.close();

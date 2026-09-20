@@ -77,7 +77,35 @@
 
 .deeper-world .rf-world-prompt small { display: block; margin-top: 4px; font-size: 10px; font-weight: 400; }
 .deeper-world .rf-world-prompt:enabled { background: #2a1a0b; border-color: var(--ember); color: var(--gold); }
-.deeper-world .rf-world-prompt:disabled { background: rgba(14, 10, 7, 0.78); color: #a08a6c; border-color: #4a3a26; cursor: default; pointer-events: none; }
+/* Out of reach is still a target -- tapping the sign walks the Friend over -- so it reads as dimmed
+   rather than dead. `pointer-events: none` is load-bearing: it lets the tap through to the canvas,
+   where the game hit-tests this box by its own rect and replays the walk. It also costs this sign
+   `:hover`, which is why `data-hovered` is marked on it from that same hit test. */
+.deeper-world .rf-world-prompt:disabled { background: rgba(26, 18, 11, 0.86); color: #c2a87f; border-color: #6b5334; pointer-events: none; }
+
+.deeper-world .rf-world-prompt {
+  transition: transform 120ms ease-out, border-color 120ms ease-out, background-color 120ms ease-out, box-shadow 120ms ease-out;
+}
+
+/* The lift has to carry the centring translate the prompt is positioned with, or it snaps sideways. */
+.deeper-world .rf-world-prompt[data-hovered],
+.deeper-world .rf-world-prompt:enabled:hover,
+.deeper-world .rf-world-prompt:enabled:focus-visible {
+  transform: translate(-50%, -3px);
+  border-color: var(--ember);
+  background: #3a250f;
+  color: var(--gold);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.55), 0 0 14px rgba(255, 178, 77, 0.25);
+}
+
+.deeper-world .rf-world-prompt:enabled:hover, .deeper-world .rf-world-prompt:enabled:focus-visible {
+  border-color: var(--gold);
+}
+
+/* Everything on the ledge is clickable -- bare ground walks the Friend there -- so the world reads
+   as one surface rather than a canvas with two live spots in it. */
+.deeper-world .rf-world-view canvas { cursor: pointer; }
+.deeper-world[data-approaching] .rf-world-view canvas { cursor: progress; }
 
 .deeper-world .rf-world-loading {
   position: absolute;
@@ -672,9 +700,15 @@ label.deeper-item[data-on] .rf-game-item-art { color: var(--ember); }
 .deeper-note { font-size: 11px; opacity: 0.75; }
 
 @media (prefers-reduced-motion: reduce) {
-  .deeper-pot, .deeper-entering, .deeper-verdict-loot, .deeper-verdict-trap, .deeper-mote, .deeper-descend {
+  .deeper-pot, .deeper-entering, .deeper-verdict-loot, .deeper-verdict-trap, .deeper-mote,
+  .deeper-descend {
     animation: none !important;
   }
+  /* The sign keeps its hover colours; only the movement in it goes. */
+  .deeper-world .rf-world-prompt { transition: none; }
+  .deeper-world .rf-world-prompt[data-hovered],
+  .deeper-world .rf-world-prompt:enabled:hover,
+  .deeper-world .rf-world-prompt:enabled:focus-visible { transform: translate(-50%, 0); }
 }
 
 /* The frame keeps its 3:2 ratio all the way down, so a phone renders the same document at

@@ -41,11 +41,26 @@ roughly 360 × 240 CSS pixels; the layout compacts rather than scrolls.
 | | Ledge | Dungeon |
 |---|---|---|
 | Move | WASD / arrow keys, or tap a destination | — |
-| Interact | <kbd>E</kbd> near the vendor or stairs, or tap the prompt | — |
+| Interact | tap the sign from anywhere on the ledge, or <kbd>E</kbd> once you are there | — |
 | Bank | — | <kbd>B</kbd> or tap **Bank** |
 | Descend | — | <kbd>D</kbd> / <kbd>Space</kbd>, or tap **Descend** |
 | Spend a curio | — | tap it in the quieter second row |
 | Run again | — | <kbd>R</kbd> / <kbd>Enter</kbd> |
+
+A sign is a target at any distance. Tapping the **Torch Vendor** or **Dungeon Entrance** sign from
+across the ledge walks the Friend over — the SDK's own pathfinder does the walking — and the menu
+opens by itself once he is standing there, so reaching something is one tap rather than a walk and
+then a second tap. It waits for the arrival rather than for the prompt to light up: reach is a
+generous radius, and opening on the edge of it would pop the menu while he was still out on the
+ledge. The hit area is the sign's own box and nothing wider: ground near an interaction stays plain
+floor, and tapping it just walks there. Steering by hand, or tapping elsewhere, abandons the
+approach rather than opening a menu the player has moved on from.
+
+`GameWorld` keeps its mover private and exposes no handle for it, so a sign tap reaches it the only
+way open to a game: by replaying a pointer event on the canvas the world view already listens on,
+at the exact client coordinates the destination projects to. Neither interaction stands on open
+ground — the stall is a solid crate, the staircase is a hole — so each one's destination is resolved
+once, at load, to the nearest spot the navigator accepts that still counts as being there.
 
 Sound is off by default; mute, reduced motion, the odds table and the session log live in the
 **Menu** chip. Reduced motion is picked up from the OS and resolves rooms instantly. Movement and
