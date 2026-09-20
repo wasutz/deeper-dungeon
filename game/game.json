@@ -3,17 +3,61 @@
   "consumable": "Torch",
   "price": "1000000000000000000",
   "outcomes": [
-    { "name": "Lost to the dark", "chanceBps": 5534, "reward": "0" },
-    { "name": "Tin Cache", "chanceBps": 2219, "reward": "1100000000000000000" },
-    { "name": "Copper Cache", "chanceBps": 704, "reward": "1400000000000000000" },
-    { "name": "Iron Cache", "chanceBps": 443, "reward": "1900000000000000000" },
-    { "name": "Silver Cache", "chanceBps": 253, "reward": "2800000000000000000" },
-    { "name": "Gold Cache", "chanceBps": 842, "reward": "4850000000000000000" },
-    { "name": "Amber Cache", "chanceBps": 1, "reward": "5650000000000000000" },
-    { "name": "Opal Cache", "chanceBps": 1, "reward": "7000000000000000000" },
-    { "name": "Ruby Cache", "chanceBps": 1, "reward": "9350000000000000000" },
-    { "name": "Obsidian Cache", "chanceBps": 1, "reward": "14250000000000000000" },
-    { "name": "Dragon Hoard", "chanceBps": 1, "reward": "25000000000000000000" }
+    {
+      "name": "Lost to the dark",
+      "chanceBps": 5534,
+      "reward": "0"
+    },
+    {
+      "name": "Tin Cache",
+      "chanceBps": 2219,
+      "reward": "1100000000000000000"
+    },
+    {
+      "name": "Copper Cache",
+      "chanceBps": 704,
+      "reward": "1400000000000000000"
+    },
+    {
+      "name": "Iron Cache",
+      "chanceBps": 443,
+      "reward": "1900000000000000000"
+    },
+    {
+      "name": "Silver Cache",
+      "chanceBps": 253,
+      "reward": "2800000000000000000"
+    },
+    {
+      "name": "Gold Cache",
+      "chanceBps": 842,
+      "reward": "4850000000000000000"
+    },
+    {
+      "name": "Amber Cache",
+      "chanceBps": 1,
+      "reward": "5650000000000000000"
+    },
+    {
+      "name": "Opal Cache",
+      "chanceBps": 1,
+      "reward": "7000000000000000000"
+    },
+    {
+      "name": "Ruby Cache",
+      "chanceBps": 1,
+      "reward": "9350000000000000000"
+    },
+    {
+      "name": "Obsidian Cache",
+      "chanceBps": 1,
+      "reward": "14250000000000000000"
+    },
+    {
+      "name": "Dragon Hoard",
+      "chanceBps": 1,
+      "reward": "25000000000000000000"
+    }
   ],
   "deeper": {
     "version": "0.1.0",
@@ -41,16 +85,66 @@
     ],
     "potLadderNote": "Pot value by loot tier, not by depth. An EMPTY room advances depth without advancing tier, so a deep run can still carry a shallow pot.",
     "rooms": [
-      { "depth": 1, "trapBps": 1500, "lootBps": 7000, "emptyBps": 1500 },
-      { "depth": 2, "trapBps": 1800, "lootBps": 6700, "emptyBps": 1500 },
-      { "depth": 3, "trapBps": 2200, "lootBps": 6300, "emptyBps": 1500 },
-      { "depth": 4, "trapBps": 2800, "lootBps": 5700, "emptyBps": 1500 },
-      { "depth": 5, "trapBps": 3500, "lootBps": 5000, "emptyBps": 1500 },
-      { "depth": 6, "trapBps": 4200, "lootBps": 4300, "emptyBps": 1500 },
-      { "depth": 7, "trapBps": 5000, "lootBps": 3500, "emptyBps": 1500 },
-      { "depth": 8, "trapBps": 5800, "lootBps": 2700, "emptyBps": 1500 },
-      { "depth": 9, "trapBps": 6500, "lootBps": 2000, "emptyBps": 1500 },
-      { "depth": 10, "trapBps": 7000, "lootBps": 1500, "emptyBps": 1500 }
+      {
+        "depth": 1,
+        "trapBps": 1500,
+        "lootBps": 7000,
+        "emptyBps": 1500
+      },
+      {
+        "depth": 2,
+        "trapBps": 1800,
+        "lootBps": 6700,
+        "emptyBps": 1500
+      },
+      {
+        "depth": 3,
+        "trapBps": 2200,
+        "lootBps": 6300,
+        "emptyBps": 1500
+      },
+      {
+        "depth": 4,
+        "trapBps": 2800,
+        "lootBps": 5700,
+        "emptyBps": 1500
+      },
+      {
+        "depth": 5,
+        "trapBps": 3500,
+        "lootBps": 5000,
+        "emptyBps": 1500
+      },
+      {
+        "depth": 6,
+        "trapBps": 4200,
+        "lootBps": 4300,
+        "emptyBps": 1500
+      },
+      {
+        "depth": 7,
+        "trapBps": 5000,
+        "lootBps": 3500,
+        "emptyBps": 1500
+      },
+      {
+        "depth": 8,
+        "trapBps": 5800,
+        "lootBps": 2700,
+        "emptyBps": 1500
+      },
+      {
+        "depth": 9,
+        "trapBps": 6500,
+        "lootBps": 2000,
+        "emptyBps": 1500
+      },
+      {
+        "depth": 10,
+        "trapBps": 7000,
+        "lootBps": 1500,
+        "emptyBps": 1500
+      }
     ],
     "fairness": {
       "scheme": "commit-reveal",
@@ -58,8 +152,94 @@
       "commitment": "sha256(runNonce)",
       "roomDraw": "sha256(runNonce + ':' + playId + ':' + depth) -> first 8 hex digits as uint32 -> roll = value mod 10000 (2^32 is not a multiple of 10000, so 7296 buckets hold one extra preimage: a 15.00% band is really 15.0000094%)",
       "roomOrder": "roll < trapBps -> TRAP; else roll < trapBps + lootBps -> LOOT; else EMPTY",
+      "derivedDraws": "sha256(runNonce + ':' + playId + ':' + depth + ':' + tag) for a draw that is not the room itself -- tag 'reroll' for a Lucky Charm's second chance, 'drop' for the curio an empty room leaves. Each tag is an independent digest at the same depth, recomputable from the same nonce.",
+      "itemOverrides": "A curio can override what a roll resolves to; it never changes the roll. Both the natural result and the resolved one are recorded per room, with the curio that moved it. The Greed Idol shifts the boundaries instead, taking 10 points of trap out of loot and empty in proportion, so every depth still totals 10000 bps.",
       "note": "The nonce is drawn and committed before the first room, so no room result can react to a BANK or DESCEND choice. It is withheld until the run ends -- a nonce in hand would reveal every room below you -- and revealed with the result, so every room is recomputable from it."
     },
-    "ledgerNote": "SDK v0.1 pays one fixed reward per settled draw, so a payout that depends on the player's stop depth is not expressible on-chain yet. Torch purchase, torch burn, the 25 RF reserve and cache settlement all run through the SDK client; the banked pot is a labelled simulated reward. See README.md 'Capability gap'."
+    "ledgerNote": "SDK v0.1 pays one fixed reward per settled draw, so a payout that depends on the player's stop depth is not expressible on-chain yet. Torch purchase, torch burn, the 25 RF reserve and cache settlement all run through the SDK client; the banked pot is a labelled simulated reward. See README.md 'Capability gap'.",
+    "itemRules": {
+      "carryCap": 2,
+      "ropeShareBps": 5000,
+      "greedTrapShiftBps": 1000,
+      "dropRoom": "A room that drew EMPTY and stayed EMPTY. A Ward that turns a trap aside got you past it; it did not also find you treasure.",
+      "dropChanceBps": 2000,
+      "dropChance": "An empty room leaves a curio one time in five. A curio is worth about half a run's entire expected pot, so handing one out every empty room is a faucet worth 0.175 RF a run — it turns the pot layer's 9.41% house edge into a 8.12% player edge. There is no rate that is both frequent and free: this is the published trade, not an accident. See README 'Carry-items'.",
+      "slotsNote": "The cap counts slots, not items. The Greed Idol takes both: a protective item alongside it would bank its upside while capping its downside, which priced out at more than double the sum of the two parts. Going all in is the item.",
+      "note": "Items are carried, not consumed by the ledger: SDK v0.1 has one consumable (the Torch) and buy() is its only RF debit, so an item cannot be a second ledger good. They are bought from the banked pot — the game's already-simulated currency — and found in EMPTY rooms, which otherwise do nothing. A found item goes to the satchel for a later run, so the prices below stay exact rather than circular.",
+      "pricing": "An item is priced at the expected pot it adds to a run, divided by the item-free baseline. A torch buys 0.9059 RF of expected pot for 1 RF; an item charges that same RF-per-RF rate. Derived by scripts/items.mjs and asserted by scripts/check-game.mjs.",
+      "dropWeights": "Inversely proportional to price, so every drop is worth the same in expectation and the cheap items are the common ones."
+    },
+    "items": [
+      {
+        "id": "ward",
+        "name": "Ward",
+        "category": "Defense",
+        "price18": "270000000000000000",
+        "dropWeightBps": 2386,
+        "slots": 1,
+        "summary": "Passes the trap in one armed room",
+        "effect": "Armed before you enter a room. That room's trap cannot end the run — it passes like an empty. Spent either way, so a safe room wastes it."
+      },
+      {
+        "id": "escape-rope",
+        "name": "Escape Rope",
+        "category": "Defense",
+        "price18": "420000000000000000",
+        "dropWeightBps": 1517,
+        "slots": 1,
+        "summary": "Bail from a trap with half the pot",
+        "effect": "Reactive. When a trap is revealed, bail out with half the pot instead of nothing. The run ends there."
+      },
+      {
+        "id": "lantern",
+        "name": "Lantern",
+        "category": "Information",
+        "price18": "270000000000000000",
+        "dropWeightBps": 2393,
+        "slots": 1,
+        "summary": "Read the next room before choosing",
+        "effect": "Reveals the next room's committed result before you choose. Turns one blind descent into a read."
+      },
+      {
+        "id": "divining-rod",
+        "name": "Divining Rod",
+        "category": "Information",
+        "price18": "520000000000000000",
+        "dropWeightBps": 1224,
+        "slots": 1,
+        "summary": "Forces the next room to loot",
+        "effect": "Overrides the next room's draw: it is loot, guaranteed. The Verify panel still shows the roll it replaced."
+      },
+      {
+        "id": "greed-idol",
+        "name": "Greed Idol",
+        "category": "Greed",
+        "price18": "920000000000000000",
+        "dropWeightBps": 692,
+        "slots": 2,
+        "summary": "Two tiers a loot, ten points more trap",
+        "effect": "Loot advances two pot tiers instead of one, and every room's trap chance rises by 10 points. The only way to reach the Dragon Hoard."
+      },
+      {
+        "id": "loot-sack",
+        "name": "Loot Sack",
+        "category": "Greed",
+        "price18": "520000000000000000",
+        "dropWeightBps": 1228,
+        "slots": 1,
+        "summary": "Banks one rung higher",
+        "effect": "Banking pays one tier higher than the tier you stopped on."
+      },
+      {
+        "id": "lucky-charm",
+        "name": "Lucky Charm",
+        "category": "Control",
+        "price18": "1140000000000000000",
+        "dropWeightBps": 560,
+        "slots": 1,
+        "summary": "Rerolls the room a trap ends",
+        "effect": "Reactive. When a trap is revealed, reroll that room once against a second committed draw. The reroll can still be a trap."
+      }
+    ]
   }
 }

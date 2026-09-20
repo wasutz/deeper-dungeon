@@ -48,7 +48,7 @@ async function settle(read, expected, message, timeout = 5000) {
 async function gameBounds(child) {
   assert.deepEqual(await child.locator("body").evaluate(() => {
     const bounds = document.body.getBoundingClientRect(), problems = [];
-    if (document.querySelector(".rf-game-frame,nav,header.site,footer")) problems.push("Game contains application scaffolding");
+    if (document.querySelector(".rf-game-frame,nav,header.site,footer.site")) problems.push("Game contains application scaffolding");
     for (const node of document.querySelectorAll(".rf-frame-menu,.rf-world-prompt,.deeper-hud,.deeper-descent,.deeper-choice")) {
       const box = node.getBoundingClientRect();
       if (box.left < -1 || box.right > bounds.right + 1 || box.top < -1 || box.bottom > bounds.bottom + 1) {
@@ -238,6 +238,82 @@ try {
     assert.equal(await sellable.count(), 11, "Every cache tier is listed");
     await button("Close Satchel").click();
 
+    // Curios: bought with banked pot, carried into a run, spent by it.
+    const purse = async () => Number((await child.locator(".deeper-hud").textContent()).match(/Banked([\d.]+) RF/)?.[1] ?? 0);
+    // The Friend may already be standing on the rim, in which case its prompt covers the canvas
+    // and a walk tap would land on the prompt instead of the ground.
+    const enterDungeon = async () => {
+      const prompt = child.getByRole("button", { name: /^Dungeon Entrance/ });
+      if (!await prompt.isEnabled().catch(() => false)) await walk([452, 205]);
+      await prompt.click();
+      await gameBounds(child);
+    };
+    // Bank whatever a run offers as soon as it offers anything; the curio shelf needs a purse.
+    for (let attempt = 0; attempt < 5 && await purse() < 0.54; attempt++) {
+      await enterDungeon();
+      await child.getByRole("button", { name: /and descend/ }).click();
+      await confirmIfAsked();
+      await confirmIfAsked();
+      await child.locator(".deeper-descent").waitFor();
+      for (let step = 0; step < 12; step++) {
+        if (await child.locator(".deeper-outcome").count()) break;
+        const bank = child.getByRole("button", { name: /^Bank / });
+        if (await bank.isEnabled().catch(() => false)) { await bank.click(); break; }
+        const sprung = child.getByRole("button", { name: "Take the dark", exact: true });
+        if (await sprung.count()) { await sprung.click(); break; }
+        await child.getByRole("button", { name: /^Descend/ }).click();
+        await runSettled();
+      }
+      await child.locator(".deeper-outcome").waitFor();
+      await child.getByRole("button", { name: "Back to the ledge", exact: true }).click();
+      await worldReady();
+    }
+    assert.ok(await purse() >= 0.54, `Banking fills a purse to spend on curios (${await purse()} RF)`);
+
+    await enterDungeon();
+    await child.getByRole("button", { name: /^Curio shelf/ }).click();
+    const shelf = child.locator(".deeper-item").filter({ has: child.getByRole("button", { name: "Buy", exact: true }) });
+    assert.equal(await shelf.count(), 7, "Every curio is listed with a derived price");
+    assert.match(await child.locator(".rf-frame-menu").textContent(), /expected pot it adds to a run/);
+    await gameBounds(child);
+    await shelf.filter({ hasText: "Divining Rod" }).getByRole("button", { name: "Buy", exact: true }).click();
+    await child.getByText("Divining Rod added to the satchel.", { exact: true }).waitFor();
+    await button("Close Curio shelf").click();
+    await worldReady();
+
+    // The loadout picker is the carry cap made visible: the Idol alone fills both slots.
+    await enterDungeon();
+    const pick = name => child.locator("label.deeper-item").filter({ hasText: name });
+    await pick("Divining Rod").locator("input").check();
+    const slotLine = await child.locator(".deeper-loadout-head").textContent();
+    assert.match(slotLine, /Carry\s*1 of 2 slots/);
+    // The cap is what every published price rests on, so assert the header can never claim more.
+    const filled = Number(slotLine.match(/(\d+) of (\d+) slots/)[1]);
+    assert.ok(filled <= 2, `the picker offered ${filled} of 2 slots`);
+    assert.equal(await child.locator(".deeper-slots i[data-filled]").count(), filled, "the pips match the count");
+    await child.getByRole("button", { name: /and descend/ }).click();
+    await confirmIfAsked();
+    await confirmIfAsked();
+    await child.locator(".deeper-descent").waitFor();
+    assert.match(await child.locator(".deeper-carried").textContent(), /Divining Rod/, "The kit rides along into the run");
+
+    // Forcing loot overrides the result, never the draw: both are on the record.
+    await child.getByRole("button", { name: "Divining Rod — force loot", exact: true }).click();
+    await runSettled();
+    await gameBounds(child);
+    assert.equal(await child.locator(".deeper-carried").count(), 0, "A spent charge leaves the satchel bar");
+    assert.match(await child.locator(".deeper-ribbon li[data-kind='loot']").first().getAttribute("data-kind"), /loot/);
+    await child.getByRole("button", { name: "Verify", exact: true }).first().click();
+    const bent = await child.locator(".rf-frame-menu").textContent();
+    assert.match(bent, /Drew/, "The Verify panel prints what the roll drew and what resolved");
+    assert.match(bent, /Divining Rod/, "and which curio overrode it");
+    await gameBounds(child);
+    await button("Close Verify this run").click();
+    await child.getByRole("button", { name: /^Bank |^Descend/ }).first().click();
+    await runSettled();
+    await child.getByRole("button", { name: "Back to the ledge", exact: true }).click().catch(() => undefined);
+    await worldReady();
+
     // Session history and accessibility controls.
     await child.getByRole("button", { name: /^Best depth/ }).click();
     assert.match(await child.locator(".rf-frame-menu").textContent(), /Best depth/);
@@ -260,7 +336,7 @@ try {
     await page.screenshot({ path: join(tmpdir(), `friendsdk-deeper-${width}.png`) });
     assert.deepEqual(errors, [], "No uncaught page errors");
     await context.close();
-    console.log(`PASS Deeper ${width}px: canonical artwork, keyboard/touch, vendor purchase, committed descent, bank/bust, run again, verification, satchel, mute/reduced motion, container bounds.`);
+    console.log(`PASS Deeper ${width}px: canonical artwork, keyboard/touch, vendor purchase, committed descent, bank/bust, run again, verification, satchel, curio shelf and loadout, an overridden room, mute/reduced motion, container bounds.`);
   }
 } finally {
   await browser?.close();

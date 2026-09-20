@@ -6,6 +6,7 @@ No third-party artwork, audio or fonts are bundled in this submission.
 |---|---|---|
 | Cavern ledge terrain and props | `@rarefriends/friendsdk/world` | The SDK's own renderer and prop set. The scene geometry in `game/world.ts` is original to this game. |
 | Dungeon room art | Original | Inline SVG generated in `game/descent.tsx`; silhouettes are seeded from each room's committed draw. |
+| Curio icons | Original | Hand-authored one-bit 16 x 16 masks in `game/item-art.ts`, painted by the SDK's own `ItemArt`. |
 | Rare Friend sprites | SDK pinned canonical artwork deployment, read through `@rarefriends/friendsdk/sprites` | Never rotated, non-integrally scaled, recoloured or replaced. |
 | Sound cues | `@rarefriends/friendsdk/sounds` | The SDK's ten-cue kit; see the SDK's own `SOUND_KIT.md` and `NOTICE.md`. |
 | Sample sprite frames used by the browser check | `@rarefriends/friendsdk` (`examples/fishing/sample-sprites.ts`) | Read from `node_modules` at check time; test fixture only, never shipped to players. |

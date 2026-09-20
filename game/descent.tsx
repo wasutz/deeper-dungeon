@@ -1,9 +1,13 @@
 "use client";
 
 import { useEffect, useMemo, type CSSProperties } from "react";
-import { formatGameAmount, Keycap } from "@rarefriends/friendsdk/ui";
+import { formatGameAmount, ItemArt, Keycap } from "@rarefriends/friendsdk/ui";
 import { FriendSprite } from "./sprite.js";
-import { BAND_NAMES, bandFor, MAX_DEPTH, potFor, ROOMS, type Room } from "./rules.js";
+import {
+  BAND_NAMES, bandFor, MAX_DEPTH, oddsFor, potFor, ropeShare, tierStep,
+  type Room, type RoomKind, type RoomOdds,
+} from "./rules.js";
+import { holds, itemFor, type Carried } from "./items.js";
 
 const rf = (value: bigint) => `${formatGameAmount(value, 18)} RF`;
 
@@ -59,19 +63,18 @@ function RoomArt({ depth, seed }: { depth: number; seed: number }) {
   </svg>;
 }
 
-/** Where the committed roll landed inside this room's published weight ranges. */
-function DrawBar({ depth, roll }: { depth: number; roll: number }) {
-  const room = ROOMS[depth - 1];
+/** Where the committed roll landed inside this room's weight ranges, as this loadout sees them. */
+function DrawBar({ odds, roll }: { odds: RoomOdds; roll: number }) {
   return <div className="deeper-range" role="img"
-    aria-label={`Roll ${roll} of 10000. Trap below ${room.trapBps}, loot below ${room.trapBps + room.lootBps}, otherwise empty.`}>
-    <span className="deeper-range-trap" style={{ width: `${room.trapBps / 100}%` }}>trap</span>
-    <span className="deeper-range-loot" style={{ width: `${room.lootBps / 100}%` }}>loot</span>
-    <span className="deeper-range-empty" style={{ width: `${room.emptyBps / 100}%` }}>empty</span>
+    aria-label={`Roll ${roll} of 10000. Trap below ${odds.trapBps}, loot below ${odds.trapBps + odds.lootBps}, otherwise empty.`}>
+    <span className="deeper-range-trap" style={{ width: `${odds.trapBps / 100}%` }}>trap</span>
+    <span className="deeper-range-loot" style={{ width: `${odds.lootBps / 100}%` }}>loot</span>
+    <span className="deeper-range-empty" style={{ width: `${odds.emptyBps / 100}%` }}>empty</span>
     <i className="deeper-range-mark" style={{ left: `${roll / 100}%` }} />
   </div>;
 }
 
-export type DescentPhase = "choice" | "entering" | "settling" | "unsettled" | "busted" | "banked";
+export type DescentPhase = "choice" | "entering" | "sprung" | "settling" | "unsettled" | "busted" | "banked";
 export type Settlement = Readonly<{ name: string; reward: bigint }>;
 
 export type DescentProps = {
@@ -81,13 +84,20 @@ export type DescentProps = {
   rooms: readonly Room[];
   phase: DescentPhase;
   pot: bigint;
+  carried: Carried;
+  peeked: RoomKind | null;
+  found: readonly Room[];
   paused: boolean;
   busy: boolean;
   reducedMotion: boolean;
   bestDepth: number;
   settlement: Settlement | null;
-  onDescend: () => void;
+  onDescend: (intent?: { arm?: boolean; force?: boolean }) => void;
+  onPeek: () => void;
   onBank: () => void;
+  onRope: () => void;
+  onCharm: () => void;
+  onAccept: () => void;
   onVerify: () => void;
   onLedger: () => void;
   onRetrySettle: () => void;
@@ -95,14 +105,19 @@ export type DescentProps = {
   onLeave: () => void;
 };
 
-export function Descent({ friendId, depth, tier, rooms, phase, pot, paused, busy, reducedMotion,
-  bestDepth, settlement, onDescend, onBank, onVerify, onLedger, onRetrySettle, onAgain, onLeave }: DescentProps) {
+const VERDICT: Record<RoomKind, string> = { trap: "TRAP", loot: "LOOT", empty: "EMPTY" };
+
+export function Descent({ friendId, depth, tier, rooms, phase, pot, carried, peeked, found, paused, busy,
+  reducedMotion, bestDepth, settlement, onDescend, onPeek, onBank, onRope, onCharm, onAccept,
+  onVerify, onLedger, onRetrySettle, onAgain, onLeave }: DescentProps) {
   const last = rooms[rooms.length - 1] ?? null;
   const atFloor = depth >= MAX_DEPTH;
-  const next = ROOMS[Math.min(depth, MAX_DEPTH - 1)];
-  const nextPot = potFor(tier + 1);
+  const nextDepth = Math.min(depth + 1, MAX_DEPTH);
+  const next = oddsFor(nextDepth, carried);
+  const nextPot = potFor(Math.min(tier + tierStep(carried), MAX_DEPTH), carried);
   const over = phase === "busted" || phase === "banked";
   const canAct = phase === "choice" && !paused && !busy;
+  const canReact = phase === "sprung" && !paused && !busy;
 
   // Accelerators are for the descent itself. Anything focusable already has its own keyboard
   // behaviour -- Space must press the focused button, not descend past it.
@@ -121,6 +136,19 @@ export function Descent({ friendId, depth, tier, rooms, phase, pot, paused, busy
     return () => window.removeEventListener("keydown", onKey);
   }, [paused, over, canAct, atFloor, tier, onAgain, onBank, onDescend]);
 
+  // Carried kit hangs in the chamber rather than above it: a row of its own would take the space
+  // the Friend stands in, and torchlight is where you would look for what you brought.
+  const satchel = carried.length > 0 && <ul className="deeper-carried" aria-label="Carried items">
+    {carried.map(id => {
+      const item = itemFor(id);
+      const passive = id === "greed-idol" || id === "loot-sack";
+      return <li key={id} data-passive={passive || undefined} title={item.summary}>
+        <ItemArt item={item} />
+        <span><strong>{item.name}</strong>{passive && <small>All run</small>}</span>
+      </li>;
+    })}
+  </ul>;
+
   return <section className="deeper-descent" data-band={bandFor(depth)} data-phase={phase}
     data-risk={phase === "choice" && !atFloor ? Math.min(4, Math.floor(next.trapBps / 1500)) : 0}
     aria-label="Dungeon descent" aria-busy={busy}>
@@ -135,26 +163,30 @@ export function Descent({ friendId, depth, tier, rooms, phase, pot, paused, busy
     <div className="deeper-chamber">
       <RoomArt depth={Math.max(1, depth)} seed={last?.draw.roll ?? 0} />
       <div className="deeper-torch" style={{ "--burn": `${100 - depth * 7}%` } as CSSProperties} />
+      {satchel}
       <FriendSprite friendId={friendId} facing="down" walking={phase === "entering"} reducedMotion={reducedMotion} />
       {phase === "entering" && <p className="deeper-entering">Entering room {depth + 1}…</p>}
       {last && phase !== "entering" && <p className={`deeper-verdict deeper-verdict-${last.kind}`} aria-hidden="true">
-        {last.kind === "trap" ? "TRAP" : last.kind === "loot" ? "LOOT" : "EMPTY"}
+        {VERDICT[last.kind]}
         <small>{last.kind === "trap" ? "The dark keeps the pot."
-          : last.kind === "loot" ? `Pot is now ${rf(potFor(last.tier))}.` : "Nothing here. The pot holds."}</small>
+          : last.kind === "loot" ? `Pot is now ${rf(potFor(last.tier, carried))}.`
+            : last.drop ? `Nothing here but a ${itemFor(last.drop).name} in the rubble.` : "Nothing here. The pot holds."}</small>
       </p>}
       {/* One region that outlives its own content: a live region mounted with its text already
           in place is not reliably announced. */}
       <p className="deeper-announce" role="status">
         {phase === "entering" ? `Entering room ${depth + 1}.`
           : last ? `Room ${last.depth}: ${last.kind}. ${last.kind === "trap" ? "The run is over."
-            : last.kind === "loot" ? `The pot is now ${rf(potFor(last.tier))}.` : "The pot holds."}` : ""}
+            : last.kind === "loot" ? `The pot is now ${rf(potFor(last.tier, carried))}.`
+              : last.drop ? `The pot holds. You found a ${itemFor(last.drop).name}.` : "The pot holds."}` : ""}
       </p>
     </div>
 
     <ol className="deeper-ribbon" aria-label="Rooms cleared">
       {Array.from({ length: MAX_DEPTH }, (_, index) => {
         const room = rooms[index];
-        return <li key={index} data-kind={room?.kind ?? "unknown"} data-current={index + 1 === depth || undefined}>
+        return <li key={index} data-kind={room?.kind ?? "unknown"} data-current={index + 1 === depth || undefined}
+          data-bent={room && room.used.length > 0 ? "" : undefined}>
           <span aria-hidden="true">{index + 1}</span>
           <small className="deeper-visually-hidden">Room {index + 1}: {room?.kind ?? "not entered"}</small>
         </li>;
@@ -163,15 +195,29 @@ export function Descent({ friendId, depth, tier, rooms, phase, pot, paused, busy
 
     {last && <div className="deeper-draw">
       <span className="deeper-draw-head">Dice draw · room {last.depth}</span>
-      <DrawBar depth={last.depth} roll={last.draw.roll} />
+      <DrawBar odds={oddsFor(last.depth, carried)} roll={(last.reroll ?? last.draw).roll} />
       <span className="deeper-draw-foot">
-        <span className="deeper-draw-hash"><b>{last.draw.roll}</b> / 10000 · sha256 {last.draw.hash.slice(0, 8)}…</span>
+        <span className="deeper-draw-hash">
+          <b>{(last.reroll ?? last.draw).roll}</b> / 10000 · sha256 {(last.reroll ?? last.draw).hash.slice(0, 8)}…
+          {last.used.length > 0 && <em> · {VERDICT[last.natural].toLowerCase()} overridden by {last.used.map(id => itemFor(id).name).join(" and ")}</em>}
+        </span>
         <button type="button" className="deeper-link" onClick={onVerify}>Verify</button>
       </span>
     </div>}
 
     <div className="deeper-choice">
-      {phase === "settling" ? <>
+      {phase === "sprung" ? <>
+        <p className="deeper-outcome deeper-outcome-bust">A trap at depth {depth}. You still have something to spend.</p>
+        <div className="deeper-buttons">
+          {holds(carried, "escape-rope") && <button type="button" className="deeper-primary" disabled={!canReact} onClick={onRope}>
+            Escape Rope — leave with {rf(ropeShare(pot))}
+          </button>}
+          {holds(carried, "lucky-charm") && <button type="button" className="deeper-primary" disabled={!canReact} onClick={onCharm}>
+            Lucky Charm — reroll this room
+          </button>}
+          <button type="button" disabled={!canReact} onClick={onAccept}>Take the dark</button>
+        </div>
+      </> : phase === "settling" ? <>
         <p className="deeper-settling" role="status">Settling the torch with the ledger…</p>
       </> : phase === "unsettled" ? <>
         <p className="deeper-settling deeper-settling-failed" role="alert">The run is over, but its torch is still open
@@ -180,17 +226,12 @@ export function Descent({ friendId, depth, tier, rooms, phase, pot, paused, busy
           <button type="button" className="deeper-primary" disabled={paused || busy} onClick={onRetrySettle}>Settle this torch</button>
           <button type="button" disabled={paused || busy} onClick={onLeave}>Back to the ledge</button>
         </div>
-      </> : phase === "busted" ? <>
-        <p className="deeper-outcome deeper-outcome-bust">Lost to the dark at depth {depth}.</p>
-        {settlement && <p className="deeper-ledger">Simulated payout. The v0.1 ledger settled the torch separately
-          as <b>{settlement.name}</b> · {rf(settlement.reward)}.
-          <button type="button" className="deeper-link" onClick={onLedger}>Why?</button></p>}
-        <div className="deeper-buttons">
-          <button type="button" className="deeper-primary" disabled={paused || busy} onClick={onAgain}>Run again <Keycap>R</Keycap></button>
-          <button type="button" disabled={paused || busy} onClick={onLeave}>Back to the ledge</button>
-        </div>
-      </> : phase === "banked" ? <>
-        <p className="deeper-outcome deeper-outcome-bank">Banked {rf(pot)} from depth {depth}.</p>
+      </> : over ? <>
+        <p className={`deeper-outcome deeper-outcome-${phase === "banked" ? "bank" : "bust"}`}>
+          {phase === "banked" ? `Banked ${rf(pot)} from depth ${depth}.` : `Lost to the dark at depth ${depth}.`}
+        </p>
+        {found.length > 0 && <p className="deeper-found">Carried out of the dark:{" "}
+          <b>{found.map(room => itemFor(room.drop!).name).join(", ")}</b>. Ready for the next run.</p>}
         {settlement && <p className="deeper-ledger">Simulated payout. The v0.1 ledger settled the torch separately
           as <b>{settlement.name}</b> · {rf(settlement.reward)}.
           <button type="button" className="deeper-link" onClick={onLedger}>Why?</button></p>}
@@ -201,16 +242,33 @@ export function Descent({ friendId, depth, tier, rooms, phase, pot, paused, busy
       </> : <>
         <p className="deeper-odds">
           {atFloor ? "The dungeon floor. There is nowhere deeper to go."
-            : <>Room {depth + 1} is a <b>{next.trapBps / 100}%</b> trap. Loot takes the pot to <b>{rf(nextPot)}</b>.</>}
+            : peeked ? <>The Lantern shows room {nextDepth}: <b className={`deeper-peek-${peeked}`}>{VERDICT[peeked]}</b>.
+              {peeked === "loot" ? ` Loot takes the pot to ${rf(nextPot)}.` : peeked === "trap" ? " Walk in and it ends you." : " Nothing down there but the depth."}</>
+            : <>Room {nextDepth} is a <b>{next.trapBps / 100}%</b> trap. Loot takes the pot to <b>{rf(nextPot)}</b>.</>}
         </p>
         <div className="deeper-buttons">
           <button type="button" className="deeper-bank" disabled={!canAct || tier === 0} onClick={onBank}>
             {tier === 0 ? "Nothing to bank yet" : <>Bank {rf(pot)} <Keycap>B</Keycap></>}
           </button>
-          {!atFloor && <button type="button" className="deeper-descend" disabled={!canAct} onClick={onDescend}>
+          {!atFloor && <button type="button" className="deeper-descend" disabled={!canAct} onClick={() => onDescend()}>
             {tier === 0 && depth === 0 ? "Descend" : "Descend — risk it"} <Keycap>D</Keycap>
           </button>}
+          {/* Ten empty rooms leaves nothing to bank and nowhere to go; the torch still needs closing out. */}
+          {atFloor && tier === 0 && <button type="button" disabled={paused || busy} onClick={onLeave}>
+            Back to the ledge
+          </button>}
         </div>
+        {!atFloor && <div className="deeper-buttons deeper-buttons-items">
+          {holds(carried, "lantern") && !peeked && <button type="button" disabled={!canAct} onClick={onPeek}>
+            Lantern — read room {nextDepth}
+          </button>}
+          {holds(carried, "ward") && <button type="button" disabled={!canAct} onClick={() => onDescend({ arm: true })}>
+            Arm the Ward and descend
+          </button>}
+          {holds(carried, "divining-rod") && <button type="button" disabled={!canAct} onClick={() => onDescend({ force: true })}>
+            Divining Rod — force loot
+          </button>}
+        </div>}
       </>}
     </div>
   </section>;

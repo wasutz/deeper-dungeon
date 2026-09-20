@@ -44,6 +44,7 @@ roughly 360 × 240 CSS pixels; the layout compacts rather than scrolls.
 | Interact | <kbd>E</kbd> near the vendor or stairs, or tap the prompt | — |
 | Bank | — | <kbd>B</kbd> or tap **Bank** |
 | Descend | — | <kbd>D</kbd> / <kbd>Space</kbd>, or tap **Descend** |
+| Spend a curio | — | tap it in the quieter second row |
 | Run again | — | <kbd>R</kbd> / <kbd>Enter</kbd> |
 
 Sound is off by default; mute, reduced motion, the odds table and the session log live in the
@@ -53,11 +54,13 @@ every dungeon choice lock while the runtime's `paused` prop is true.
 ## The loop
 
 1. **Torch Vendor** — one **Torch** costs exactly **1 RF**. It lights one run.
-2. **Dungeon Entrance** — the staircase consumes the torch and commits the run.
-3. **Rooms 1–10** — each is a committed draw into **LOOT** (pot climbs a tier), **EMPTY** (safe, pot
-   unchanged) or **TRAP** (the run ends and the unbanked pot is lost).
-4. After any safe room: **BANK** the pot, or **DESCEND**. Depth caps at 10.
-5. Bust or bank, **Run again** restarts in one tap, buying a torch if you have none.
+2. **Curio shelf** — spend banked pot on up to **2 slots** of carry-items for the next descent.
+3. **Dungeon Entrance** — pick the loadout; the staircase consumes the torch and commits the run.
+4. **Rooms 1–10** — each is a committed draw into **LOOT** (pot climbs a tier), **EMPTY** (safe, pot
+   unchanged, and one time in five it leaves a curio in the rubble) or **TRAP** (the run ends and the
+   unbanked pot is lost).
+5. After any safe room: **BANK** the pot, or **DESCEND**. Depth caps at 10.
+6. Bust or bank, **Run again** restarts in one tap with the same kit where the satchel still has it.
 
 Pot value follows the **loot tier**, not the depth. An empty room takes you deeper without growing
 the pot, so depth and pot drift apart — which is what makes the stopping decision interesting
@@ -71,6 +74,7 @@ rather than a table lookup.
   stop when free stake cannot back another maximum prize; already-purchased torches stay usable.
 - **Kept caches have no redemption expiry** and always sell for their fixed RF value.
 - Maximum prize per run: **25 RF**. Weights total **10 000 bps**.
+- **A loadout is spent by the run it goes into**, used or not — which is exactly what its price buys.
 
 ### Room weights and the pot ladder
 
@@ -107,6 +111,86 @@ The trap column is indexed by **depth**; the pot column by **loot tier**.
 
 Weights are the run-result distribution under the reference (EV-optimal) line, with every tier
 floored at 1 bp so all eleven stay representable and redeemable.
+
+## Carry-items
+
+Seven curios, bought at the vendor with **banked pot** or found in **empty rooms**, carried two
+slots at a time. Every price is solved, not chosen:
+
+```sh
+npm run items            # price the catalogue and print what each curio does to a run
+```
+
+An item is worth the expected pot it adds to a single descent, priced at `gain / baseline` — the
+same RF-per-RF rate the 1 RF torch charges. `scripts/check-game.mjs` asserts the published prices
+against the solver, so they cannot drift from the numbers that justify them.
+
+| Curio | Slots | Price | Adds | Effect |
+|---|---|---|---|---|
+| Ward | 1 | 0.27 RF | +0.2518 | Armed before a room; that room's trap passes like an empty. Spent either way. |
+| Lantern | 1 | 0.27 RF | +0.2511 | Reveals the next room's committed result before you choose. |
+| Escape Rope | 1 | 0.42 RF | +0.3962 | Reactive: on a revealed trap, leave with **half** the pot. |
+| Loot Sack | 1 | 0.52 RF | +0.4894 | Banking pays one rung higher than the tier you stopped on. |
+| Divining Rod | 1 | 0.52 RF | +0.4908 | Overrides the next room's draw: loot, guaranteed. |
+| Greed Idol | **2** | 0.92 RF | +0.8677 | Loot advances **two** tiers; every room's trap chance +10 points. |
+| Lucky Charm | 1 | 1.14 RF | +1.0735 | Reactive: on a revealed trap, reroll the room against a second committed draw. |
+
+### What the solver decided, not the designer
+
+- **A flat pot multiplier is inert.** Value is linear in pot scale, so "+50% loot value" changes no
+  decision; only its trap penalty bites, which makes optimal play *more* timid. The first Greed Idol
+  cut bust from 55% to 29% and capped the ceiling at 1.65 RF. Advancing two tiers per loot rewards
+  the descent itself: bust rises to 82%, the spread goes 1.39 → 5.37, and the 25 RF Dragon Hoard
+  becomes reachable — the only curio that opens the top of the ladder.
+- **A half-bank hedge is mathematically dead.** "Bank half, descend with the rest" is worth
+  `P/2 + max(P,W)/2` where `P` is banking and `W` is descending — a midpoint of two options can
+  never beat the better one. Solved over every reachable state its gain is exactly 0.000000000, and
+  strictly negative wherever descending is correct. It is a variance dial, not an item, so it is not
+  in the catalogue.
+- **The Greed Idol has to travel alone.** Paired with a protective curio it priced at more than
+  double the sum of its parts — Idol + Lucky Charm reached 5.54× baseline, because the protection
+  banks the upside while capping the downside. Giving it both carry slots removes the pair outright.
+
+### Drops cost house edge, and the rate is the price
+
+A curio is worth **0.4458 RF** — about half a run's entire expected pot. So a drop is never a small
+gift, and the rate it falls at is spent directly out of the house edge:
+
+| Empty rooms that drop | Pot-layer EV | House edge | One curio every |
+|---|---|---|---|
+| 0% | 0.9059 RF | 9.41% | never |
+| 10% | 0.9249 RF | 7.51% | 24 runs |
+| **20%** (shipped) | **0.9435 RF** | **5.65%** | **12 runs** |
+| 50% | 0.9969 RF | 0.31% | 5 runs |
+| 100% | 1.0812 RF | **−8.12%** | 2 runs |
+
+There is no rate that is both frequent and free. Dropping from *every* empty room — the obvious
+first design — is a faucet worth 0.175 RF a run that hands the player an 8% edge over the house.
+`dropChanceBps` in `game.json` is the dial; `check:games` fails if it is ever tuned far enough to
+give the pot layer away.
+
+Two consequences follow the solver rather than taste:
+
+- **A curio's worth and its price define each other** — an empty room is worth more than the pot it
+  preserves because it also leaves a curio, and what that curio is worth is what curios cost. Prices
+  are a fixed point, settled in nine passes. Leaving drops out priced the Ward and the Greed Idol
+  against a game neither is played in: one manufactures empty rooms, the other destroys them.
+- **A room a curio bent leaves nothing behind.** A Ward that turns a trap aside got you past it; it
+  did not also find you treasure. Crediting a drop there would put value in the Ward its price never
+  charged for.
+
+### Overlaps left in
+
+Curios interact, and the solver prices each standalone, so some pairs are better than their parts
+and some are worse. Both are published rather than tuned away:
+
+- **Divining Rod + Lucky Charm** is superadditive by 21% and returns **+0.23 RF** over its price —
+  the strongest legal loadout at 3.00× baseline, and the build worth finding.
+- **Escape Rope + Lantern** is 15% *sub*additive: a rope caps what a trap costs you, so
+  foreknowledge of one is worth less. The Lantern still adds 0.154 RF beside a rope, against 0.251
+  standalone — 39% less, not nothing.
+
+Both move simulated pot only; the ledger's own settlement draw is untouched.
 
 ## Tuning
 
@@ -147,6 +231,25 @@ room  = roll < trapBps                ? TRAP
       :                                 EMPTY
 ```
 
+A curio never touches that draw. It can override what a roll *resolves to* — a Ward passing a trap
+off as an empty, a Divining Rod forcing loot — and the Verify panel prints both columns, what the
+roll drew and what the room became, with the curio that moved it. Two derived draws hang off the
+same nonce under their own tags, so each stays independently recomputable and none can collide with
+the room roll:
+
+```
+reroll      = sha256(nonce + ":" + playId + ":" + depth + ":reroll")       a Lucky Charm's second chance
+drop        = sha256(nonce + ":" + playId + ":" + depth + ":drop")        whether an empty room leaves a curio
+drop-item   = sha256(nonce + ":" + playId + ":" + depth + ":drop-item")   which curio it leaves
+```
+
+The Verify panel prints all of them once the run is over, so the two draws that hand out curios are
+checkable by hand like every other.
+
+The Greed Idol shifts the boundaries rather than the roll: +10 points of trap taken out of loot and
+empty in proportion, so the three still total 10 000 bps at every depth and the published bands stay
+checkable.
+
 Because the nonce is fixed before any choice, no room result can react to a BANK or DESCEND. The
 nonce is **withheld while the run is live** — a player holding it could hash the rooms below and
 stop one room short of every trap — and revealed with the result. **Verify** (in the dungeon, or per
@@ -175,7 +278,10 @@ link on every run-over screen opens the same explanation):
 - **Real, through the SDK client:** the 1 RF torch purchase (`buy`), the torch burn and run
   commitment (`play`), the 25 RF maximum-prize reserve, the per-run settlement (`settle`) and cache
   redemption (`redeem`). Free-stake backing and reserves behave exactly as the SDK enforces them.
-- **Simulated at the game layer:** the banked pot.
+- **Simulated at the game layer:** the banked pot, and the curios it buys. SDK v0.1 has one
+  consumable and `buy` is its only RF debit, so a curio cannot be a second thing the ledger sells;
+  pricing them in banked pot keeps the whole item economy inside the layer that is already labelled
+  as simulated rather than opening a second gap.
 
 The two agree in expectation — 0.9122 RF per torch from the published table against 0.9059 RF from
 optimal stopping — but they are separate draws, so a session's banked total and satchel value
@@ -189,17 +295,19 @@ adapter, deployment flow, on-chain action or Solidity is implemented here.
 ```sh
 npm ci
 npm run typecheck
-npm test                 # digest, draws and room boundaries
-npm run check:games      # definition, weights, roll boundaries, economy simulation
+npm test                 # digest, draws, room boundaries and every curio effect
+npm run check:games      # definition, weights, roll boundaries, economy and item prices
 npx playwright install --with-deps chromium
 npm run check:browser    # end-to-end, 1100 px and 360 px
 npm run tuning           # the full economy table
+npm run items            # curio prices, pair overlaps and the strongest legal loadout
 ```
 
 `scripts/check-browser.mjs` drives the real runner with the SDK's mocked wallet, identity and canonical
 sprite fixture at 1100 px and 360 px: connect, select, keyboard and touch movement, vendor purchase,
 a committed descent, bank or bust, the `paused` lock, one-tap restart, verification, the satchel,
-mute and reduced motion, and that nothing escapes the container or covers a control.
+the curio shelf and loadout picker, a room overridden by a Divining Rod, mute and reduced motion,
+and that nothing escapes the container or covers a control.
 
 The SDK is consumed straight from <https://github.com/spokesz/friendsdk>, pinned to commit
 `da4828f`, and needs no changes to the SDK. Upstream keeps `dist/` out of version control and
@@ -220,25 +328,36 @@ submission, which resolves the SDK through `node_modules`.
 | `game/descent.tsx` | The dungeon scene: room art, draw reveal, bank/descend prompt |
 | `game/sprite.tsx` | Canonical Friend pixels on a canvas, 16 × 16 mask at integer 5× scale |
 | `game/world.ts` | The cavern ledge: geometry, the staircase hole, props, interactions |
-| `game/rules.ts` | Typed tuning read from `game.json`, room resolution, depth bands |
+| `game/rules.ts` | Typed tuning read from `game.json`, room resolution, item effects, depth bands |
+| `game/items.ts` | The curio catalogue, carry-slot rules and empty-room drops |
+| `game/item-art.ts` | One-bit 16 × 16 masks, one per curio |
 | `game/fairness.ts` | SHA-256 and the commit-and-reveal room draw |
 | `game/game.json` | Torch cost, outcome weights, rewards, room weights, pot ladder, consumable rules |
 | `game/style.css` | Cavern palette, descent layout, responsive rules |
 | `scripts/tuning.mjs` | Economy solver and verifier |
+| `scripts/items.mjs` | Carry-item solver: prices, pair overlaps, drop weights |
 | `scripts/check-game.mjs` | Definition, weight and roll-boundary validation |
 | `scripts/check-browser.mjs` | End-to-end browser check |
 | `scripts/fixture.mjs` | The SDK's wallet/RPC fixture, vendored for the browser check |
 | `scripts/build-sdk.mjs` | Builds the git-installed SDK on `postinstall` |
 | `tests/fairness.test.mjs` | Digest, draw and room-boundary tests |
+| `tests/items.test.mjs` | Curio effects, tagged reroll and drop draws, carry-slot rules |
 
 ## Assets
 
 See [NOTICE.md](NOTICE.md). No third-party art. The cavern ledge uses the SDK's own world renderer and prop set
 (`@rarefriends/friendsdk/world`) with geometry authored in `world.ts`; the dungeon rooms are inline
 SVG generated in `descent.tsx`, with silhouettes seeded from each room's own committed draw. The
+curio icons are hand-authored one-bit 16 × 16 masks in `item-art.ts` — the same register as the
+Friend's canonical sprites — painted by the SDK's own `ItemArt` in `currentColor`, so a selected
+row lights its icon without a second asset. The
 Friend's sprites come from the SDK's pinned canonical artwork deployment and are never rotated,
 scaled non-integrally, recoloured or replaced. Sound uses the SDK's ten-cue kit
 (`@rarefriends/friendsdk/sounds`). The SDK's world view ships a white ground and signal-green
-prompts, so `style.css` themes that DOM itself rather than importing
-`@rarefriends/friendsdk/world-view.css` — the renderer output and the canonical Friend pixels are
-untouched, and the game's build stays clear of the SDK's `assets/` directory.
+prompts, and `game-frame.css` ships a light `#eee` menu panel, so `style.css` themes both DOM trees
+itself rather than importing `@rarefriends/friendsdk/world-view.css` — the renderer output and the
+canonical Friend pixels are untouched, and the game's build stays clear of the SDK's `assets/`
+directory. The menu body is re-laid as a flex column with one gap so every panel keeps the same
+rhythm; the SDK spaces only paragraphs, which leaves anything else flush against the control below
+it. Each menu's primary action goes in `GameMenu`'s pinned `footer` rather than the scrolling body,
+so a long loadout list cannot bury it.
