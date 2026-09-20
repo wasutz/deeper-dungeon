@@ -408,6 +408,156 @@ button.deeper-chip:hover, button.deeper-chip:focus-visible { border-color: var(-
   text-decoration: underline;
 }
 
+/* ---------- carried curios ---------- */
+
+/* Hung in the chamber, not above it: a row of its own would take the space the Friend stands in. */
+.deeper-carried {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  z-index: 1;
+  display: flex;
+  gap: 5px;
+  flex-wrap: wrap;
+  max-width: 45%;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.deeper-carried li {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 8px 3px 6px;
+  border: 1px solid #5a452c;
+  border-left-width: 3px;
+  border-radius: 4px 7px 7px 4px;
+  background: rgba(10, 7, 5, 0.82);
+  backdrop-filter: blur(2px);
+}
+
+.deeper-carried li[data-passive] { border-left-color: var(--bank); }
+.deeper-carried li:not([data-passive]) { border-left-color: var(--ember); }
+.deeper-carried span { display: flex; flex-direction: column; gap: 1px; }
+.deeper-carried .rf-game-item-art { width: 15px; height: 15px; color: var(--gold); margin: 0; }
+.deeper-carried strong { font-size: 10px; color: var(--gold); letter-spacing: 0.02em; }
+.deeper-carried small { font-size: 8px; letter-spacing: 0.08em; text-transform: uppercase; color: #9b856a; }
+
+/* A second, quieter row: spending a curio should never be as loud as bank or descend. */
+.deeper-buttons-items button {
+  min-height: 34px;
+  font-size: 11px;
+  padding: 0 12px;
+  border-color: #46351f;
+  color: #c9b08a;
+}
+
+.deeper-found { margin: 0; text-align: center; font-size: 11px; color: #9b856a; }
+.deeper-found b { color: var(--bank); }
+
+.deeper-peek-trap { color: var(--danger); }
+.deeper-peek-loot { color: var(--gold); }
+.deeper-peek-empty { color: #cbb89c; }
+
+.deeper-draw-hash em { font-style: normal; color: var(--ember); }
+
+/* A room a curio bent reads differently from one the draw alone decided. */
+.deeper-ribbon li[data-bent] { border-style: dashed; }
+
+/* ---------- the menu, themed rather than imported ----------
+   game-frame.css ships a light panel (#eee on #111) that lands in the cavern as a bright grey
+   rectangle. These rules re-dress the SDK's own DOM, the way the world view is re-dressed above.
+   The body becomes a flex column with a single gap so every menu gets the same rhythm -- the SDK
+   spaces only paragraphs, which left anything else flush against the button below it. */
+
+/* The SDK floats its wallet toolbar over the bottom strip; the menu clears it the way the
+   descent's controls do, rather than ending underneath it. */
+.deeper-game .rf-frame-scrim {
+  padding: 20px 20px calc(var(--toolbar, 56px) + 8px);
+  background: rgba(5, 4, 3, 0.74);
+  color: #f4e9d8;
+}
+
+.deeper-game .rf-frame-menu {
+  max-width: 480px;
+  border: 1px solid #5a452c;
+  border-radius: 14px;
+  background: #14100b;
+  box-shadow: 0 18px 44px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(255, 178, 77, 0.06) inset;
+}
+
+.deeper-game .rf-frame-menu-heading {
+  padding: 11px 16px;
+  border-bottom: 1px solid #3a2d1c;
+  background: linear-gradient(180deg, #1a1409, #14100b);
+}
+
+.deeper-game .rf-frame-menu-heading h2 {
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: var(--gold);
+}
+
+.deeper-game .rf-frame-menu-heading button {
+  min-height: 28px;
+  padding: 0 9px;
+  border-color: #3a2d1c;
+  border-radius: 7px;
+  background: transparent;
+  color: #9b856a;
+}
+
+.deeper-game .rf-frame-menu-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+  line-height: 1.5;
+}
+
+.deeper-game .rf-frame-menu-body > p { margin: 0; color: #d8c6a8; }
+.deeper-game .rf-frame-menu-body label { display: flex; align-items: center; gap: 8px; }
+.deeper-game .rf-frame-menu-body input[type="checkbox"] { accent-color: var(--ember); width: 14px; height: 14px; }
+.deeper-game .rf-frame-menu-body > p b { color: var(--gold); font-weight: 700; }
+.deeper-game .rf-frame-menu-body code { color: var(--ember); overflow-wrap: anywhere; }
+.deeper-game .rf-frame-menu-body [role="alert"] { color: var(--danger); }
+
+.deeper-game .rf-frame-scrim button {
+  min-height: 40px;
+  padding: 0 14px;
+  border: 1px solid #5a452c;
+  border-radius: 9px;
+  background: #1a1209;
+  color: #e8d9be;
+  letter-spacing: 0.02em;
+}
+
+.deeper-game .rf-frame-scrim button:hover:not(:disabled) { background: #241809; border-color: var(--ember); color: var(--gold); }
+.deeper-game .rf-frame-scrim button:focus-visible { outline: 2px solid var(--ember); outline-offset: 2px; }
+
+.deeper-game .rf-frame-scrim .rf-frame-primary {
+  border-color: var(--ember);
+  background: linear-gradient(180deg, #3a2409, #241708);
+  color: var(--gold);
+  font-weight: 700;
+}
+
+.deeper-game .rf-frame-scrim .rf-frame-primary:hover:not(:disabled) { background: linear-gradient(180deg, #4a2d0a, #2e1c08); }
+
+.deeper-game .rf-frame-menu-footer {
+  padding: 12px 16px;
+  border-top: 1px solid #3a2d1c;
+  background: #100c07;
+}
+
+.deeper-game .rf-frame-menu-footer button { flex: 1; }
+
+/* Row actions sit beside their item rather than spanning the panel. */
+.deeper-game .deeper-item button { min-height: 32px; padding: 0 11px; font-size: 11px; flex: none; }
+.deeper-game .deeper-link { min-height: 0; padding: 0; border: 0; background: none; }
+
 /* ---------- menus ---------- */
 
 .deeper-table { width: 100%; border-collapse: collapse; font-size: 12px; }
@@ -418,6 +568,92 @@ button.deeper-chip:hover, button.deeper-chip:focus-visible { border-color: var(-
 .deeper-item { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .deeper-item span { display: flex; flex-direction: column; }
 .deeper-item small { opacity: 0.75; font-size: 11px; }
+
+.deeper-loadout { display: grid; gap: 6px; }
+
+.deeper-loadout-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: #9b856a;
+}
+
+.deeper-loadout-head span:last-child { margin-left: auto; color: #c9b08a; }
+
+/* The cap, made physical: one pip per slot, both lit at once by the Idol. */
+.deeper-slots { display: flex; gap: 3px; flex: none; }
+.deeper-slots i {
+  width: 9px;
+  height: 14px;
+  border: 1px solid #5a452c;
+  border-radius: 2px;
+  background: #100b07;
+}
+.deeper-slots i[data-filled] {
+  border-color: var(--ember);
+  background: var(--ember);
+  box-shadow: 0 0 8px rgba(255, 178, 77, 0.5);
+}
+
+label.deeper-item {
+  align-items: flex-start;
+  gap: 9px;
+  padding: 8px 10px;
+  border: 1px solid #3a2d1c;
+  border-left: 3px solid #3a2d1c;
+  border-radius: 4px 9px 9px 4px;
+  background: #100b07;
+  cursor: pointer;
+  justify-content: flex-start;
+}
+
+label.deeper-item:hover:not(:has(input:disabled)) { border-color: #5a452c; border-left-color: #7a5f37; }
+label.deeper-item[data-on] { border-color: #6b5230; border-left-color: var(--ember); background: rgba(255, 178, 77, 0.07); }
+label.deeper-item[data-on] strong { color: var(--gold); }
+label.deeper-item:has(input:disabled) { opacity: 0.4; cursor: not-allowed; }
+label.deeper-item:has(input:focus-visible) { outline: 2px solid var(--ember); outline-offset: 2px; }
+label.deeper-item input { accent-color: var(--ember); margin: 2px 0 0; flex: none; }
+label.deeper-item strong { font-size: 12px; }
+label.deeper-item small { line-height: 1.45; color: #c9b08a; }
+
+/* The dry facts sit under the plain-language line, quieter than it. */
+.deeper-meta {
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #7d6a51;
+}
+
+.deeper-offer {
+  align-items: flex-start;
+  gap: 12px;
+  padding: 9px 11px;
+  border: 1px solid #2c2216;
+  border-radius: 9px;
+  background: #100b07;
+}
+
+/* The SDK's ItemArt paints the mask in currentColor, so the colour is set on the row. */
+.deeper-game .rf-game-item-art {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  margin-top: 1px;
+  color: #9b856a;
+  image-rendering: pixelated;
+}
+
+.deeper-offer .rf-game-item-art { color: #ab9271; }
+label.deeper-item .rf-game-item-art { width: 24px; height: 24px; }
+label.deeper-item[data-on] .rf-game-item-art { color: var(--ember); }
+
+.deeper-offer strong { display: flex; align-items: baseline; gap: 8px; font-size: 12px; }
+.deeper-offer small { line-height: 1.45; }
+.deeper-price { margin-left: auto; color: var(--gold); font-size: 13px; white-space: nowrap; }
 
 .deeper-proof { display: grid; grid-template-columns: auto 1fr; gap: 2px 10px; margin: 0; font-size: 11px; }
 .deeper-proof dt { opacity: 0.7; }
@@ -467,4 +703,42 @@ button.deeper-chip:hover, button.deeper-chip:focus-visible { border-color: var(-
   .deeper-ledger { font-size: 8px; }
   .deeper-buttons { gap: 6px; }
   .deeper-choice button, .deeper-descent button { min-height: 32px; font-size: 10px; padding: 0 9px; border-radius: 7px; }
+  .deeper-buttons-items button { min-height: 26px; font-size: 9px; padding: 0 7px; }
+  /* The chamber is barely taller than the Friend here. A charge already names itself on its own
+     button below, so only the run-long items — which have no button — keep a chip. */
+  .deeper-carried { gap: 3px; top: 5px; left: 5px; }
+  .deeper-carried li:not([data-passive]) {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+  .deeper-carried li { padding: 1px 5px; border-radius: 4px; }
+  .deeper-carried strong { font-size: 9px; }
+  .deeper-carried small { font-size: 7px; }
+  .deeper-carried .rf-game-item-art { width: 11px; height: 11px; }
+  .deeper-game .rf-game-item-art { width: 20px; height: 20px; }
+  label.deeper-item .rf-game-item-art { width: 18px; height: 18px; }
+  .deeper-found { font-size: 8px; }
+  /* The frame is only ~240px tall here, so the menu clears the toolbar's actual 32px strip
+     rather than the descent's wider allowance, and every band gives back what it can. */
+  .deeper-game .rf-frame-scrim { padding: 6px 6px 38px; }
+  .deeper-game .rf-frame-menu { border-radius: 10px; }
+  .deeper-game .rf-frame-menu-heading { padding: 5px 9px; }
+  .deeper-game .rf-frame-menu-heading h2 { font-size: 12px; }
+  .deeper-game .rf-frame-menu-heading button { min-height: 22px; padding: 0 7px; }
+  .deeper-game .rf-frame-menu-body { gap: 7px; padding: 8px 9px; line-height: 1.4; }
+  .deeper-game .rf-frame-menu-footer { padding: 6px 9px; }
+  .deeper-game .rf-frame-scrim button { min-height: 30px; border-radius: 7px; }
+  .deeper-game .deeper-item button { min-height: 26px; font-size: 10px; }
+  .deeper-loadout { gap: 4px; }
+  .deeper-loadout-head { font-size: 9px; }
+  .deeper-slots i { width: 7px; height: 11px; }
+  label.deeper-item { padding: 5px 7px; gap: 7px; }
+  label.deeper-item strong, .deeper-offer strong { font-size: 11px; }
+  .deeper-offer { padding: 6px 8px; gap: 8px; }
+  .deeper-meta { font-size: 9px; }
 }

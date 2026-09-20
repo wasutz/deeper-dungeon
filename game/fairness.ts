@@ -71,12 +71,16 @@ export type RoomDraw = Readonly<{ preimage: string; hash: string; roll: number }
 /**
  * The first 32 bits of the digest, folded into the contract's 10000-bucket roll space.
  *
+ * `tag` extends the preimage for a draw that is not the room itself -- a Lucky Charm reroll, or
+ * the item an empty room yields. Each tag gets its own independent digest at the same depth, so
+ * one committed nonce still recomputes every one of them and none can collide with the room roll.
+ *
  * 2^32 is not a multiple of 10000, so 7296 of the buckets carry one extra preimage: a published
  * 15.00% band is really 15.0000094%. That is kept rather than rejection-sampled because a
  * verifier has to be able to recompute a room from one digest, with no retry loop to replay.
  */
-export function drawRoom(nonce: string, playId: bigint, depth: number): RoomDraw {
-  const preimage = `${nonce}:${playId}:${depth}`;
+export function drawRoom(nonce: string, playId: bigint, depth: number, tag?: string): RoomDraw {
+  const preimage = tag === undefined ? `${nonce}:${playId}:${depth}` : `${nonce}:${playId}:${depth}:${tag}`;
   const hash = sha256Hex(preimage);
   return { preimage, hash, roll: Number(BigInt(`0x${hash.slice(0, 8)}`) % 10_000n) };
 }

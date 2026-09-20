@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { parseChanceGame, expectedReward, maximumPrize, outcomeForRoll, RF } from "@rarefriends/friendsdk/game";
 import { verify } from "./tuning.mjs";
+import { priceItems, dropWeights, toBaseUnits } from "./items.mjs";
 
 const source = JSON.parse(await readFile(new URL("../game/game.json", import.meta.url), "utf8"));
 const game = parseChanceGame(source);
@@ -40,6 +41,31 @@ assert.ok(reward > 850n * RF / 1000n && reward < 950n * RF / 1000n, `expected re
 const economy = verify({ quiet: true });
 assert.deepEqual(economy.problems, [], "the committed table matches the economy simulation");
 
+// Carry-items. Prices are solved, not chosen, so the catalogue is held to the solver that
+// justifies it exactly as the pot ladder is held to the economy simulation.
+const { items, itemRules } = source.deeper;
+const { priced, drop } = priceItems();
+const weights = dropWeights(priced);
+for (const [index, item] of items.entries()) {
+  assert.ok(item.slots >= 1 && item.slots <= itemRules.carryCap, `${item.name} fits the carry cap`);
+  assert.equal(item.price18, toBaseUnits(priced[index].price), `${item.name} is priced at what it adds`);
+  assert.equal(item.dropWeightBps, weights[index], `${item.name} drops at its derived weight`);
+  assert.ok(BigInt(item.price18) > 0n, `${item.name} costs something`);
+  assert.ok(item.effect.length > 0 && item.category.length > 0, `${item.name} is described`);
+  assert.ok(item.summary.length > 0 && item.summary.length < 46, `${item.name} has a picker-sized summary`);
+}
+assert.equal(items.reduce((sum, item) => sum + item.dropWeightBps, 0), 10_000, "drop weights total 10000 bps");
+assert.ok(itemRules.dropChanceBps > 0 && itemRules.dropChanceBps < 10_000, "an empty room sometimes leaves a curio");
+// A curio is worth about half a run, so the drop rate spends house edge directly. Hold the pot
+// layer to an edge rather than letting a tuning nudge quietly hand the game to the player.
+const { baseline } = priceItems();
+assert.ok(baseline < 0.99, `pot-layer EV ${baseline.toFixed(4)} RF leaves no house edge`);
+assert.ok(baseline > 0.85, `pot-layer EV ${baseline.toFixed(4)} RF is outside the tuned band`);
+assert.equal(new Set(items.map(item => item.id)).size, items.length, "item ids are unique");
+
+console.log(`PASS Deeper items: ${items.length} carried, ${itemRules.carryCap} slots per run, ` +
+  `a curio worth ${drop.toFixed(2)} RF dropped by ${itemRules.dropChanceBps / 100}% of empty rooms, ` +
+  `pot-layer EV ${baseline.toFixed(4)} RF (${((1 - baseline) * 100).toFixed(2)}% edge).`);
 console.log(`PASS Deeper definition: 1 RF torch, ${maximumPrize(game) / RF} RF maximum prize, ` +
   `${(Number(reward) / Number(RF)).toFixed(4)} RF expected per torch, ` +
   `${economy.ev.toFixed(4)} RF under optimal stopping (${((1 - economy.ev) * 100).toFixed(2)}% house edge).`);
