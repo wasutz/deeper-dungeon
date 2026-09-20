@@ -192,7 +192,7 @@ export default function Deeper({ friendId, client, paused }: GameComponentProps)
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
-  const [muted, setMuted] = useState(true);
+  const [muted, setMuted] = useState(false);
   const [reducedMotion, setReducedMotion] = useState(false);
   const [stock, setStock] = useState<Stock>({});
   const [loadout, setLoadout] = useState<Carried>([]);
@@ -206,6 +206,8 @@ export default function Deeper({ friendId, client, paused }: GameComponentProps)
   const replaying = useRef(false);
   const motionChosen = useRef(false);
   const sound = useRef<FriendSoundKit | null>(null);
+  /** Survives a Friend switch, which builds a new kit: a player who muted stays muted. */
+  const mutePreference = useRef(false);
   const locked = useRef(false);
   const epoch = useRef(0);
   const runCount = useRef(0);
@@ -213,9 +215,9 @@ export default function Deeper({ friendId, client, paused }: GameComponentProps)
 
   useEffect(() => {
     const version = ++epoch.current;
-    sound.current = createFriendSoundKit({ muted: true });
+    sound.current = createFriendSoundKit({ muted: mutePreference.current });
     setSnapshot(null); setBacked(false); setMenu(null); setRun(null); setPhase("choice"); setSettlement(null); setUnsettled(null);
-    setHistory([]); setTotals(NO_TOTALS); setVerifying(null); setError(""); setMessage(""); setBusy(false); setMuted(true);
+    setHistory([]); setTotals(NO_TOTALS); setVerifying(null); setError(""); setMessage(""); setBusy(false);
     setStock({}); setLoadout([]); setPurse(0n); setPeeked(null); setTally(NO_TALLY);
     locked.current = false;
     runCount.current = 0;
@@ -254,6 +256,16 @@ export default function Deeper({ friendId, client, paused }: GameComponentProps)
   }, [paused]);
 
   /**
+   * `unlock()` is asynchronous and `play()` is silent until it resolves, so a cue fired in the
+   * same tick as the gesture that first unlocks audio would be lost. Every cue goes through here.
+   */
+  const playCue = useCallback((name: FriendSoundCue) => {
+    const kit = sound.current;
+    if (!kit) return;
+    void kit.unlock().then(ready => { if (ready && sound.current === kit) kit.play(name); });
+  }, []);
+
+  /**
    * One simulated action at a time. `work` receives `isCurrent` because a Friend switch can land
    * mid-await: any state it writes after that belongs to a session that no longer exists.
    */
@@ -262,11 +274,10 @@ export default function Deeper({ friendId, client, paused }: GameComponentProps)
     const version = epoch.current;
     locked.current = true;
     setBusy(true); setError(""); setMessage("");
-    void sound.current?.unlock();
     try {
       await work(() => version === epoch.current);
       const value = await client.read();
-      if (version === epoch.current) { setSnapshot(value); if (cue) sound.current?.play(cue); }
+      if (version === epoch.current) { setSnapshot(value); if (cue) playCue(cue); }
       return true;
     } catch (cause) {
       if (version === epoch.current) setError(cause instanceof Error ? cause.message : "The simulated action failed.");
@@ -274,7 +285,7 @@ export default function Deeper({ friendId, client, paused }: GameComponentProps)
     } finally {
       if (version === epoch.current) { locked.current = false; setBusy(false); }
     }
-  }, [client, paused]);
+  }, [client, paused, playCue]);
 
   const openMenu = useCallback((next: Menu) => {
     if (!busy && !paused) { setMenu(next); setError(""); setMessage(""); }
@@ -414,19 +425,18 @@ export default function Deeper({ friendId, client, paused }: GameComponentProps)
   const settleRoom = useCallback((next: Run, room: Room) => {
     if (room.drop) setStock(current => restock(current, room.drop!, 1));
     if (room.kind === "trap") {
-      if (canAnswerTrap(next.carried)) { sound.current?.play("impact"); setPhase("sprung"); return; }
+      if (canAnswerTrap(next.carried)) { playCue("impact"); setPhase("sprung"); return; }
       void finishRun(next, false, 0n);
       return;
     }
-    sound.current?.play(room.kind === "loot" ? (room.depth >= 6 ? "reveal-rare" : "reveal-common") : "action-ready");
+    playCue(room.kind === "loot" ? (room.depth >= 6 ? "reveal-rare" : "reveal-common") : "action-ready");
     setPhase("choice");
-  }, [finishRun]);
+  }, [finishRun, playCue]);
 
   const descend = useCallback((intent: Intent = {}) => {
     if (!run || phase !== "choice" || busy || paused || run.depth >= MAX_DEPTH) return;
     setPhase("entering");
-    void sound.current?.unlock();
-    sound.current?.play("anticipation");
+    playCue("anticipation");
     // The peek is cleared by the room that consumes it, not by the attempt to enter one. A pause
     // rewinds a held descent to the choice, and a read the player already paid a Lantern for has
     // to survive that -- otherwise the charge is gone, the room is unentered, and its committed
@@ -448,7 +458,7 @@ export default function Deeper({ friendId, client, paused }: GameComponentProps)
     };
     if (reducedMotion) resolve();
     else timer.current = setTimeout(resolve, ROOM_REVEAL_MS);
-  }, [run, phase, busy, paused, reducedMotion, peeked, settleRoom]);
+  }, [run, phase, busy, paused, reducedMotion, peeked, settleRoom, playCue]);
 
   const peek = useCallback(() => {
     // The floor guard is the same one `descend` keeps: clamping instead would re-read the room
@@ -462,8 +472,8 @@ export default function Deeper({ friendId, client, paused }: GameComponentProps)
     setTally(current => observed(current, depth, run.carried, kind));
     setPeeked({ depth, kind });
     setRun({ ...run, carried: spend(run.carried, "lantern") });
-    sound.current?.play("action-ready");
-  }, [run, phase, busy, paused]);
+    playCue("action-ready");
+  }, [run, phase, busy, paused, playCue]);
 
   const bank = useCallback(() => {
     if (!run || phase !== "choice" || busy || paused || run.tier === 0) return;
@@ -516,9 +526,16 @@ export default function Deeper({ friendId, client, paused }: GameComponentProps)
     if (busy || paused || purse < item.price) return;
     setPurse(previous => previous - item.price);
     setStock(current => restock(current, id, 1));
-    sound.current?.play("purchase");
+    playCue("purchase");
     setMessage(`${item.name} added to the satchel.`);
-  }, [busy, paused, purse]);
+  }, [busy, paused, purse, playCue]);
+
+  const setSoundOn = useCallback((on: boolean) => {
+    mutePreference.current = !on;
+    setMuted(!on);
+    sound.current?.setMuted(!on);
+    if (on) void sound.current?.unlock();
+  }, []);
 
   const leaveDungeon = () => {
     setRun(null); setPhase("choice"); setSettlement(null); setUnsettled(null); setVerifying(null); setMenu(null);
@@ -838,12 +855,8 @@ export default function Deeper({ friendId, client, paused }: GameComponentProps)
           differ by however the variance falls. Closing the gap needs a contract action such
           as <code>bank(playId, tier)</code>; that is the first item for the on-chain phase.</p>
       </> : menu === "settings" ? <>
-        <button type="button" aria-pressed={!muted} onClick={() => {
-          const next = !muted;
-          setMuted(next);
-          sound.current?.setMuted(next);
-          if (!next) void sound.current?.unlock();
-        }}>Sound</button>
+        <label><input type="checkbox" checked={!muted}
+          onChange={event => setSoundOn(event.target.checked)} /> Sound</label>
         <label><input type="checkbox" checked={reducedMotion}
           onChange={event => { motionChosen.current = true; setReducedMotion(event.target.checked); }} /> Reduce motion</label>
         <button type="button" onClick={() => openMenu("odds")}>Room odds</button>

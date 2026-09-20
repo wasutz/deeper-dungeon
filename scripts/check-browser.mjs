@@ -373,12 +373,12 @@ try {
     await button("Close Fair play").click();
     await child.getByRole("button", { name: /^Menu/ }).click();
     assert.equal(await child.getByLabel("Reduce motion").isChecked(), true, "Reduced motion is honoured from the OS preference");
-    const sound = button("Sound");
-    assert.equal(await sound.getAttribute("aria-pressed"), "false", "Sound starts muted");
-    await sound.click();
-    await child.locator("button[aria-pressed='true']", { hasText: "Sound" }).waitFor();
-    await sound.click();
-    assert.equal(await sound.getAttribute("aria-pressed"), "false", "The sound toggle reports its own state");
+    const sound = child.getByLabel("Sound");
+    assert.equal(await sound.isChecked(), true, "Sound is on by default");
+    await sound.uncheck();
+    assert.equal(await sound.isChecked(), false, "The sound toggle reports its own state");
+    await sound.check();
+    assert.equal(await sound.isChecked(), true);
     await button("Room odds").click();
     assert.match(await child.locator(".rf-frame-menu").textContent(), /9\.4% edge/);
     await gameBounds(child);
