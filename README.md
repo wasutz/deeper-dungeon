@@ -73,9 +73,10 @@ once, at load, to the nearest spot the navigator accepts that still counts as be
 
 Sound is on by default; mute, reduced motion, the odds table and the session log live in the
 **Menu** chip. The chip belongs to the ledge, and a descent makes the ledge inert, so those toggles
-are reachable between runs rather than during one. Reduced motion is picked up from the OS and
-resolves rooms instantly. Movement and every dungeon choice lock while the runtime's `paused` prop
-is true.
+are reachable between runs rather than during one. Reduced motion is seeded from the OS preference
+and then follows the toggle in both directions: on, rooms resolve instantly and nothing animates;
+off, the reveal plays even for a player whose OS asks for stillness, because they asked for it
+here. Movement and every dungeon choice lock while the runtime's `paused` prop is true.
 
 ## The loop
 

@@ -814,18 +814,21 @@ label.deeper-item[data-on] .rf-game-item-art { color: var(--ember); }
 .deeper-feedback { margin: 0; font-size: 11px; opacity: 0.8; }
 .deeper-note { font-size: 11px; opacity: 0.75; }
 
-@media (prefers-reduced-motion: reduce) {
-  .deeper-pot, .deeper-entering, .deeper-verdict-loot, .deeper-verdict-trap, .deeper-mote,
-  .deeper-descend, .deeper-range-rail, .deeper-range-mark, .deeper-range-mark b,
-  .deeper-sprite[data-waiting] {
-    animation: none !important;
-  }
-  .deeper-range-rail { transition: none; }
-  /* The sign keeps its hover colours; only the movement in it goes. */
-  .deeper-world .rf-world-prompt { transition: none; }
-  .deeper-world .rf-world-prompt[data-hovered],
-  .deeper-world .rf-world-prompt:enabled:hover,
-  .deeper-world .rf-world-prompt:enabled:focus-visible { transform: translate(-50%, 0); }
+/* Keyed off the toggle's own state, which the OS preference only seeds. Keying it off the media
+   query instead strands the player who turns the toggle back on: the timings would wait for
+   animations the stylesheet had already stripped, freezing the reveal it narrates. */
+.deeper-game[data-motion="reduce"] :is(.deeper-pot, .deeper-entering, .deeper-verdict-loot,
+  .deeper-verdict-trap, .deeper-mote, .deeper-descend, .deeper-range-rail, .deeper-range-mark,
+  .deeper-range-mark b, .deeper-sprite[data-waiting]) {
+  animation: none !important;
+}
+.deeper-game[data-motion="reduce"] .deeper-range-rail { transition: none; }
+/* The sign keeps its hover colours; only the movement in it goes. */
+.deeper-game[data-motion="reduce"] .deeper-world .rf-world-prompt { transition: none; }
+.deeper-game[data-motion="reduce"] .deeper-world .rf-world-prompt[data-hovered],
+.deeper-game[data-motion="reduce"] .deeper-world .rf-world-prompt:enabled:hover,
+.deeper-game[data-motion="reduce"] .deeper-world .rf-world-prompt:enabled:focus-visible {
+  transform: translate(-50%, 0);
 }
 
 /* The frame keeps its 3:2 ratio all the way down, so a phone renders the same document at

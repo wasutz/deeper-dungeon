@@ -194,7 +194,10 @@ export default function Deeper({ friendId, client, paused }: GameComponentProps)
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [muted, setMuted] = useState(false);
-  const [reducedMotion, setReducedMotion] = useState(false);
+  // Seeded from the OS on the first render rather than in an effect: a frame of movement is
+  // exactly what a player who asked for none should never see.
+  const [reducedMotion, setReducedMotion] = useState(
+    () => window.matchMedia("(prefers-reduced-motion: reduce)").matches);
   const [stock, setStock] = useState<Stock>({});
   const [loadout, setLoadout] = useState<Carried>([]);
   const [purse, setPurse] = useState(0n);
@@ -616,7 +619,8 @@ export default function Deeper({ friendId, client, paused }: GameComponentProps)
     playId: source.playId, rooms: source.rooms, carried: source.carried,
   });
 
-  return <section className="deeper-game" aria-label={definition.name} aria-busy={busy}>
+  return <section className="deeper-game" data-motion={reducedMotion ? "reduce" : "full"}
+    aria-label={definition.name} aria-busy={busy}>
     {/* Steering by hand is the player changing their mind: the walk they queued stops being what
         they want the moment they take the controls back. */}
     <div className="deeper-world" ref={world} inert={worldPaused || undefined} onPointerDown={onWorldPointer}
