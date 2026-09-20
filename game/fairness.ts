@@ -68,7 +68,13 @@ export function createRunNonce(): string {
 
 export type RoomDraw = Readonly<{ preimage: string; hash: string; roll: number }>;
 
-/** The first 32 bits of the digest, folded into the contract's 10000-bucket roll space. */
+/**
+ * The first 32 bits of the digest, folded into the contract's 10000-bucket roll space.
+ *
+ * 2^32 is not a multiple of 10000, so 7296 of the buckets carry one extra preimage: a published
+ * 15.00% band is really 15.0000094%. That is kept rather than rejection-sampled because a
+ * verifier has to be able to recompute a room from one digest, with no retry loop to replay.
+ */
 export function drawRoom(nonce: string, playId: bigint, depth: number): RoomDraw {
   const preimage = `${nonce}:${playId}:${depth}`;
   const hash = sha256Hex(preimage);

@@ -11,8 +11,9 @@ or a separate wallet flow.
 
 ## Run it
 
-Node.js 22+ on Linux or Ubuntu/WSL2, plus a browser wallet holding a hardwired Rare Friends
-Generations NFT (generation ≥ 1) on Robinhood mainnet (4663).
+Node.js 22+ and git on Linux or Ubuntu/WSL2, plus a browser wallet holding a hardwired Rare
+Friends Generations NFT (generation ≥ 1) on Robinhood mainnet (4663). `npm ci` clones the SDK from
+its repository and builds it, so the first install needs network access.
 
 ```sh
 git clone https://github.com/wasutz/deeper.git
@@ -53,7 +54,7 @@ every dungeon choice lock while the runtime's `paused` prop is true.
 
 1. **Torch Vendor** — one **Torch** costs exactly **1 RF**. It lights one run.
 2. **Dungeon Entrance** — the staircase consumes the torch and commits the run.
-3. **Rooms 1–10** — each is a Dice draw into **LOOT** (pot climbs a tier), **EMPTY** (safe, pot
+3. **Rooms 1–10** — each is a committed draw into **LOOT** (pot climbs a tier), **EMPTY** (safe, pot
    unchanged) or **TRAP** (the run ends and the unbanked pot is lost).
 4. After any safe room: **BANK** the pot, or **DESCEND**. Depth caps at 10.
 5. Bust or bank, **Run again** restarts in one tap, buying a torch if you have none.
@@ -129,8 +130,10 @@ maximum prize              25 RF
 The ladder is built against each room's break-even growth, `(1 − empty) / loot`. Up to tier 5 every
 step clears break-even by a hair, so descending is correct but only just — that razor edge is the
 game. Past tier 5 growth is held below break-even, so the deep rooms pay spectacularly without ever
-being the right call. Reaching depth 6 happens in about 4.9% of runs; the 25 RF Dragon Hoard is a
-lure, not a plan.
+being the right call. A player following that line never enters room 6 at all — the reach column
+above reads 0.00% from depth 6 down, and tiers 6-10 carry the 1 bp floor the weights give them so
+they stay representable. One who ignores it and descends every room clears room 6 about 14.8% of the
+time (25.4% are still alive to enter it). Either way the 25 RF Dragon Hoard is a lure, not a plan.
 
 ## Provably fair rooms
 
@@ -145,13 +148,17 @@ room  = roll < trapBps                ? TRAP
 ```
 
 Because the nonce is fixed before any choice, no room result can react to a BANK or DESCEND. The
-nonce is revealed when the run ends; **Verify** (in the dungeon, or per run in **This session**)
-prints the commitment, the nonce, the play ID and every room's digest and roll, so the whole run
-can be recomputed by hand. SHA-256 is implemented in `fairness.ts` rather than taken from WebCrypto
+nonce is **withheld while the run is live** — a player holding it could hash the rooms below and
+stop one room short of every trap — and revealed with the result. **Verify** (in the dungeon, or per
+run in **This session**) prints the commitment, the play ID and every resolved room's digest and
+roll at any time, and adds the nonce once the run is over, so the whole run can be recomputed by
+hand. The fold is `uint32 mod 10000`, which leaves 7296 buckets holding one extra preimage: a
+published 15.00% band is really 15.0000094%. Rejection sampling would remove that, at the cost of a
+retry loop a verifier has to replay by hand. SHA-256 is implemented in `fairness.ts` rather than taken from WebCrypto
 because the sandboxed frame has an opaque origin, where `crypto.subtle` is not guaranteed to exist.
-`fairness.test.mjs` holds it to `node:crypto` across block boundaries and multi-byte input, checks
-that rolls fill the 10 000 buckets evenly, and drives the real resolver against the published
-boundaries.
+`fairness.test.mjs` holds it to `node:crypto` across block boundaries and multi-byte input, holds
+40 000 committed draws to a chi-square bound over ten equal bands, and drives the real resolver
+against the published boundaries.
 
 ## Capability gap: the pot and the ledger
 
@@ -171,7 +178,8 @@ link on every run-over screen opens the same explanation):
 - **Simulated at the game layer:** the banked pot.
 
 The two agree in expectation — 0.9122 RF per torch from the published table against 0.9059 RF from
-optimal stopping — so a session's banked total and satchel value converge. Closing the gap needs a
+optimal stopping — but they are separate draws, so a session's banked total and satchel value
+differ by however the variance falls. Closing the gap needs a
 contract action such as `bank(playId, tier)` that settles a committed play at a player-chosen tier
 bounded by a committed trap depth. **That is the first item for the on-chain phase.** No transaction
 adapter, deployment flow, on-chain action or Solidity is implemented here.
@@ -193,9 +201,12 @@ sprite fixture at 1100 px and 360 px: connect, select, keyboard and touch moveme
 a committed descent, bank or bust, the `paused` lock, one-tap restart, verification, the satchel,
 mute and reduced motion, and that nothing escapes the container or covers a control.
 
-This project vendors the SDK as a package archive, so it needs no SDK checkout and no changes to
-the SDK. One unrelated observation from building against a clone of the SDK repo, in case it is
-useful upstream: `scripts/check-games.mjs` allow-lists only `dist/`, `src/` and `node_modules/` as
+The SDK is consumed straight from <https://github.com/spokesz/friendsdk>, pinned to commit
+`da4828f`, and needs no changes to the SDK. Upstream keeps `dist/` out of version control and
+defines no `prepare` script, which is the one lifecycle npm runs for a git dependency, so
+`scripts/build-sdk.mjs` builds the package in place on `postinstall` using the SDK's own
+devDependencies. One unrelated observation from building against a clone of the SDK repo, in case
+it is useful upstream: `scripts/check-games.mjs` allow-lists only `dist/`, `src/` and `node_modules/` as
 build sources, while `package.json` maps `./world-view.css` and `./frame.css` into `assets/`. A game
 developed *inside* the SDK repo under `games/` that imports an SDK stylesheet therefore fails that
 script, including a fresh `friendsdk init` copy of `examples/starter`. It does not affect this
@@ -217,8 +228,8 @@ submission, which resolves the SDK through `node_modules`.
 | `scripts/check-game.mjs` | Definition, weight and roll-boundary validation |
 | `scripts/check-browser.mjs` | End-to-end browser check |
 | `scripts/fixture.mjs` | The SDK's wallet/RPC fixture, vendored for the browser check |
+| `scripts/build-sdk.mjs` | Builds the git-installed SDK on `postinstall` |
 | `tests/fairness.test.mjs` | Digest, draw and room-boundary tests |
-| `vendor/` | `rarefriends-friendsdk-0.1.0.tgz`, packed from upstream `da4828f` |
 
 ## Assets
 

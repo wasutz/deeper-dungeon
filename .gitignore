@@ -1,4 +1,7 @@
 node_modules/
 .friendsdk/
+dist/
 .env*
 *.log
+*.tsbuildinfo
+.DS_Store

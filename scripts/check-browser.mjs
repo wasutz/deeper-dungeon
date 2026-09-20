@@ -10,6 +10,7 @@ import assert from "node:assert/strict";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
 import { decodeFunctionData, encodeFunctionResult } from "viem";
 import { FAMILIES_REGISTRY_ABI, GENERATION_SPRITE_MANIFEST } from "@rarefriends/friendsdk/sprites";
@@ -63,7 +64,7 @@ async function gameBounds(child) {
 const directory = await mkdtemp(join(tmpdir(), "friendsdk-deeper-browser-"));
 let build, server, browser;
 try {
-  build = await buildGame(new URL("../game", import.meta.url).pathname, { outdir: join(directory, "dist") });
+  build = await buildGame(fileURLToPath(new URL("../game", import.meta.url)), { outdir: join(directory, "dist") });
   server = createGameServer(build.outdir);
   await new Promise(done => server.listen(0, "127.0.0.1", done));
   const origin = `http://127.0.0.1:${server.address().port}`;
@@ -84,6 +85,9 @@ try {
 
     const child = page.frameLocator("iframe");
     const button = name => child.getByRole("button", { name, exact: true });
+    // A resolved room hands off to the SDK settlement before the run is called over, so wait for
+    // the descent to come back to a choice or to show its outcome rather than for the verdict.
+    const runSettled = () => child.locator(".deeper-descent[data-phase='choice'], .deeper-outcome").first().waitFor();
     const confirm = () => page.getByRole("button", { name: "Confirm preview", exact: true }).click();
     // Each SDK mutation is authorised separately, so a one-tap restart that also buys a torch
     // raises two in-frame confirmations.
@@ -147,8 +151,20 @@ try {
     await page.getByRole("button", { name: "Close Friend wallet", exact: true }).click();
     await settle(descendIsDisabled, false, "Descending unlocks when the runtime menu closes");
 
+    // Mid-run the Verify panel must prove the commitment without handing over the nonce: with it
+    // a player could hash the rooms below and stop one room short of every trap.
+    await child.getByRole("button", { name: /^Descend/ }).click();
+    await runSettled();
+    if (await child.locator(".deeper-outcome").count() === 0) {
+      await child.getByRole("button", { name: "Verify", exact: true }).first().click();
+      const held = await child.locator(".deeper-proof").textContent();
+      assert.match(held, /sha256\(nonce\) = [0-9a-f]{64}/, "The commitment is shown while the run is live");
+      assert.doesNotMatch(held, /03142536/, "The nonce stays held until the run ends");
+      await button("Close Verify this run").click();
+    }
+
     // Push until the run ends, banking once a pot exists and depth 4 is reached.
-    let depth = 0;
+    let depth = 1;
     for (let step = 0; step < 12; step++) {
       if (await child.locator(".deeper-outcome").count()) break;
       const tier = Number(await child.locator(".deeper-ribbon li[data-kind='loot']").count());
@@ -157,11 +173,13 @@ try {
         break;
       }
       await child.getByRole("button", { name: /^Descend/ }).click();
-      await child.locator(".deeper-verdict").waitFor();
+      await runSettled();
       depth = Number((await child.locator(".deeper-descent-bar").textContent()).match(/Depth(\d+)/)?.[1] ?? depth + 1);
       await gameBounds(child);
       if (depth === 2) await page.screenshot({ path: join(tmpdir(), `friendsdk-deeper-descent-${width}.png`) });
     }
+    // Banking and busting both wait on the SDK settlement before the run is called over.
+    await child.locator(".deeper-outcome").waitFor();
     const outcome = await child.locator(".deeper-outcome").textContent();
     assert.match(outcome, /Lost to the dark at depth \d+\.|Banked .* from depth \d+\./, "A run ends banked or busted");
     await child.locator(".deeper-ledger").waitFor();
@@ -203,9 +221,10 @@ try {
 
     // Abandoning mid-run leaves a burning torch the entrance can close out.
     await child.getByRole("button", { name: /^Descend/ }).click();
-    await child.locator(".deeper-verdict").waitFor();
+    await runSettled();
     if (await child.locator(".deeper-outcome").count() === 0) {
       await child.getByRole("button", { name: /^Bank |^Descend/ }).first().click();
+      await runSettled();
     }
     await child.getByRole("button", { name: "Back to the ledge", exact: true }).click().catch(() => undefined);
 
@@ -226,12 +245,14 @@ try {
     await button("Close This session").click();
     await child.getByRole("button", { name: /^Menu/ }).click();
     assert.equal(await child.getByLabel("Reduce motion").isChecked(), true, "Reduced motion is honoured from the OS preference");
-    await button("Sound off").click();
-    await button("Sound on").waitFor();
-    await button("Sound on").click();
-    await button("Sound off").waitFor();
+    const sound = button("Sound");
+    assert.equal(await sound.getAttribute("aria-pressed"), "false", "Sound starts muted");
+    await sound.click();
+    await child.locator("button[aria-pressed='true']", { hasText: "Sound" }).waitFor();
+    await sound.click();
+    assert.equal(await sound.getAttribute("aria-pressed"), "false", "The sound toggle reports its own state");
     await button("Room odds").click();
-    assert.match(await child.locator(".rf-frame-menu").textContent(), /9\.4% house edge/);
+    assert.match(await child.locator(".rf-frame-menu").textContent(), /9\.4% edge/);
     await gameBounds(child);
     await button("Close Room odds").click();
 

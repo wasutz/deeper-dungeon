@@ -289,6 +289,17 @@ button.deeper-chip:hover, button.deeper-chip:focus-visible { border-color: var(-
 .deeper-ribbon li[data-kind="trap"] { border-color: var(--danger); color: var(--danger); background: rgba(255, 107, 87, 0.16); }
 .deeper-ribbon li[data-current] { outline: 1px solid var(--ember); outline-offset: 1px; }
 
+.deeper-visually-hidden, .deeper-announce {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
 .deeper-draw {
   display: grid;
   gap: 3px;
@@ -343,12 +354,14 @@ button.deeper-chip:hover, button.deeper-chip:focus-visible { border-color: var(-
   padding: 8px 0 2px;
 }
 
-.deeper-odds, .deeper-outcome, .deeper-ledger { margin: 0; text-align: center; }
+.deeper-odds, .deeper-outcome, .deeper-settling, .deeper-ledger { margin: 0; text-align: center; }
 .deeper-odds { font-size: 13px; color: #c9b08a; }
 .deeper-odds b { color: var(--gold); }
 .deeper-outcome { font-size: 22px; font-weight: 700; letter-spacing: 0.04em; }
 .deeper-outcome-bust { color: var(--danger); }
 .deeper-outcome-bank { color: var(--bank); }
+.deeper-settling { font-size: 15px; color: #c9b08a; }
+.deeper-settling-failed { color: var(--danger); }
 .deeper-ledger { font-size: 11px; color: #9b856a; }
 .deeper-ledger b { color: #c9b08a; }
 

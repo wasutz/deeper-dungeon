@@ -8,12 +8,15 @@ import { createHash, randomBytes } from "node:crypto";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { build } from "esbuild";
 
 // The game's modules are TypeScript and import game.json, so compile them to a temporary
 // directory the way the SDK runner does rather than duplicating the rules in the test.
 const directory = await mkdtemp(join(tmpdir(), "deeper-fairness-"));
-const game = name => new URL(`../game/${name}`, import.meta.url).pathname;
+// fileURLToPath, not URL.pathname: a repository path containing a space arrives percent-encoded
+// and esbuild cannot resolve it.
+const game = name => fileURLToPath(new URL(`../game/${name}`, import.meta.url));
 await build({
   entryPoints: [game("fairness.ts"), game("rules.ts")],
   bundle: true, format: "esm", platform: "neutral", target: "es2022", outdir: directory, logLevel: "error",
@@ -43,6 +46,9 @@ test("a room draw is a pure function of the commitment, the play and the depth",
   }
 });
 
+// The inputs are fixed, so this is a pinned measurement rather than a sampled one: chi-square
+// over ten equal bands of 40 000 draws. Nine degrees of freedom put the p=0.001 tail at 27.9,
+// so a real skew in the digest or the fold fails here while the committed seeds cannot drift.
 test("rolls fill the contract's 10000 buckets evenly", () => {
   const deciles = new Array(10).fill(0);
   const samples = 40_000;
@@ -51,9 +57,9 @@ test("rolls fill the contract's 10000 buckets evenly", () => {
     assert.ok(Number.isInteger(roll) && roll >= 0 && roll < 10_000, "rolls stay inside the bucket space");
     deciles[Math.floor(roll / 1000)]++;
   }
-  for (const count of deciles) {
-    assert.ok(Math.abs(count - samples / 10) < samples / 10 * 0.12, `decile ${count} is within 12% of uniform`);
-  }
+  const expected = samples / 10;
+  const chiSquare = deciles.reduce((sum, count) => sum + (count - expected) ** 2 / expected, 0);
+  assert.ok(chiSquare < 27.9, `decile chi-square ${chiSquare.toFixed(2)} exceeds the p=0.001 bound of 27.9`);
 });
 
 test("enterRoom classifies every draw by the weights game.json publishes", () => {

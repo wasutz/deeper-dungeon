@@ -71,7 +71,7 @@ function DrawBar({ depth, roll }: { depth: number; roll: number }) {
   </div>;
 }
 
-export type DescentPhase = "choice" | "entering" | "busted" | "banked";
+export type DescentPhase = "choice" | "entering" | "settling" | "unsettled" | "busted" | "banked";
 export type Settlement = Readonly<{ name: string; reward: bigint }>;
 
 export type DescentProps = {
@@ -90,12 +90,13 @@ export type DescentProps = {
   onBank: () => void;
   onVerify: () => void;
   onLedger: () => void;
+  onRetrySettle: () => void;
   onAgain: () => void;
   onLeave: () => void;
 };
 
 export function Descent({ friendId, depth, tier, rooms, phase, pot, paused, busy, reducedMotion,
-  bestDepth, settlement, onDescend, onBank, onVerify, onLedger, onAgain, onLeave }: DescentProps) {
+  bestDepth, settlement, onDescend, onBank, onVerify, onLedger, onRetrySettle, onAgain, onLeave }: DescentProps) {
   const last = rooms[rooms.length - 1] ?? null;
   const atFloor = depth >= MAX_DEPTH;
   const next = ROOMS[Math.min(depth, MAX_DEPTH - 1)];
@@ -103,9 +104,13 @@ export function Descent({ friendId, depth, tier, rooms, phase, pot, paused, busy
   const over = phase === "busted" || phase === "banked";
   const canAct = phase === "choice" && !paused && !busy;
 
+  // Accelerators are for the descent itself. Anything focusable already has its own keyboard
+  // behaviour -- Space must press the focused button, not descend past it.
   useEffect(() => {
     if (paused) return;
     const onKey = (event: KeyboardEvent) => {
+      if (event.repeat || event.metaKey || event.ctrlKey || event.altKey) return;
+      if ((event.target as Element | null)?.closest?.("button, a, input, select, textarea, [role='dialog']")) return;
       const key = event.key.toLowerCase();
       if (over && (key === "r" || key === "enter")) { event.preventDefault(); onAgain(); return; }
       if (!canAct) return;
@@ -131,19 +136,27 @@ export function Descent({ friendId, depth, tier, rooms, phase, pot, paused, busy
       <RoomArt depth={Math.max(1, depth)} seed={last?.draw.roll ?? 0} />
       <div className="deeper-torch" style={{ "--burn": `${100 - depth * 7}%` } as CSSProperties} />
       <FriendSprite friendId={friendId} facing="down" walking={phase === "entering"} reducedMotion={reducedMotion} />
-      {phase === "entering" && <p className="deeper-entering" role="status">Entering room {depth + 1}…</p>}
-      {last && phase !== "entering" && <p className={`deeper-verdict deeper-verdict-${last.kind}`} role="status">
+      {phase === "entering" && <p className="deeper-entering">Entering room {depth + 1}…</p>}
+      {last && phase !== "entering" && <p className={`deeper-verdict deeper-verdict-${last.kind}`} aria-hidden="true">
         {last.kind === "trap" ? "TRAP" : last.kind === "loot" ? "LOOT" : "EMPTY"}
         <small>{last.kind === "trap" ? "The dark keeps the pot."
           : last.kind === "loot" ? `Pot is now ${rf(potFor(last.tier))}.` : "Nothing here. The pot holds."}</small>
       </p>}
+      {/* One region that outlives its own content: a live region mounted with its text already
+          in place is not reliably announced. */}
+      <p className="deeper-announce" role="status">
+        {phase === "entering" ? `Entering room ${depth + 1}.`
+          : last ? `Room ${last.depth}: ${last.kind}. ${last.kind === "trap" ? "The run is over."
+            : last.kind === "loot" ? `The pot is now ${rf(potFor(last.tier))}.` : "The pot holds."}` : ""}
+      </p>
     </div>
 
     <ol className="deeper-ribbon" aria-label="Rooms cleared">
       {Array.from({ length: MAX_DEPTH }, (_, index) => {
         const room = rooms[index];
         return <li key={index} data-kind={room?.kind ?? "unknown"} data-current={index + 1 === depth || undefined}>
-          <span>{index + 1}</span>
+          <span aria-hidden="true">{index + 1}</span>
+          <small className="deeper-visually-hidden">Room {index + 1}: {room?.kind ?? "not entered"}</small>
         </li>;
       })}
     </ol>
@@ -158,7 +171,16 @@ export function Descent({ friendId, depth, tier, rooms, phase, pot, paused, busy
     </div>}
 
     <div className="deeper-choice">
-      {phase === "busted" ? <>
+      {phase === "settling" ? <>
+        <p className="deeper-settling" role="status">Settling the torch with the ledger…</p>
+      </> : phase === "unsettled" ? <>
+        <p className="deeper-settling deeper-settling-failed" role="alert">The run is over, but its torch is still open
+          on the ledger. Settle it before starting another — the maximum prize stays reserved until you do.</p>
+        <div className="deeper-buttons">
+          <button type="button" className="deeper-primary" disabled={paused || busy} onClick={onRetrySettle}>Settle this torch</button>
+          <button type="button" disabled={paused || busy} onClick={onLeave}>Back to the ledge</button>
+        </div>
+      </> : phase === "busted" ? <>
         <p className="deeper-outcome deeper-outcome-bust">Lost to the dark at depth {depth}.</p>
         {settlement && <p className="deeper-ledger">Simulated payout. The v0.1 ledger settled the torch separately
           as <b>{settlement.name}</b> · {rf(settlement.reward)}.
@@ -183,7 +205,7 @@ export function Descent({ friendId, depth, tier, rooms, phase, pot, paused, busy
         </p>
         <div className="deeper-buttons">
           <button type="button" className="deeper-bank" disabled={!canAct || tier === 0} onClick={onBank}>
-            Bank {rf(pot)} <Keycap>B</Keycap>
+            {tier === 0 ? "Nothing to bank yet" : <>Bank {rf(pot)} <Keycap>B</Keycap></>}
           </button>
           {!atFloor && <button type="button" className="deeper-descend" disabled={!canAct} onClick={onDescend}>
             {tier === 0 && depth === 0 ? "Descend" : "Descend — risk it"} <Keycap>D</Keycap>

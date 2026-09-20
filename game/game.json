@@ -56,9 +56,9 @@
       "scheme": "commit-reveal",
       "digest": "sha-256",
       "commitment": "sha256(runNonce)",
-      "roomDraw": "sha256(runNonce + ':' + playId + ':' + depth) -> first 8 hex digits as uint32 -> roll = value mod 10000",
+      "roomDraw": "sha256(runNonce + ':' + playId + ':' + depth) -> first 8 hex digits as uint32 -> roll = value mod 10000 (2^32 is not a multiple of 10000, so 7296 buckets hold one extra preimage: a 15.00% band is really 15.0000094%)",
       "roomOrder": "roll < trapBps -> TRAP; else roll < trapBps + lootBps -> LOOT; else EMPTY",
-      "note": "The nonce is drawn and committed before the first room, so no room result can react to a BANK or DESCEND choice. The nonce is revealed when the run ends; every room is recomputable from it."
+      "note": "The nonce is drawn and committed before the first room, so no room result can react to a BANK or DESCEND choice. It is withheld until the run ends -- a nonce in hand would reveal every room below you -- and revealed with the result, so every room is recomputable from it."
     },
     "ledgerNote": "SDK v0.1 pays one fixed reward per settled draw, so a payout that depends on the player's stop depth is not expressible on-chain yet. Torch purchase, torch burn, the 25 RF reserve and cache settlement all run through the SDK client; the banked pot is a labelled simulated reward. See README.md 'Capability gap'."
   }

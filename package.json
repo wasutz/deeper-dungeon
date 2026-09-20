@@ -8,16 +8,17 @@
     "node": ">=22"
   },
   "scripts": {
+    "postinstall": "node scripts/build-sdk.mjs",
     "dev": "friendsdk dev ./game",
     "build": "friendsdk build ./game",
     "typecheck": "tsc --noEmit",
-    "test": "node --test tests/*.test.mjs",
+    "test": "node --test tests/*.test.mjs && node scripts/check-game.mjs",
     "check:games": "node scripts/check-game.mjs",
     "check:browser": "node scripts/check-browser.mjs",
     "tuning": "node scripts/tuning.mjs"
   },
   "dependencies": {
-    "@rarefriends/friendsdk": "file:vendor/rarefriends-friendsdk-0.1.0.tgz",
+    "@rarefriends/friendsdk": "git+https://github.com/spokesz/friendsdk.git#da4828f8ec49d8ac5c24556908bd4cd653f8db67",
     "react": "19.2.8",
     "react-dom": "19.2.8"
   },

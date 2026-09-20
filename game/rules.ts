@@ -14,7 +14,7 @@ export type RoomKind = "loot" | "empty" | "trap";
 export type Room = Readonly<{ depth: number; kind: RoomKind; tier: number; draw: RoomDraw }>;
 
 /** Pot for a loot tier. Tier 0 is an empty pack; tier N is the Nth cache on the ladder. */
-export const potFor = (tier: number): bigint => (tier <= 0 ? 0n : POT_LADDER[Math.min(tier, MAX_DEPTH) - 1]);
+export const potFor = (tier: number): bigint => (tier <= 0 ? 0n : POT_LADDER[Math.min(tier, POT_LADDER.length) - 1]);
 
 /** Resolve one room from its committed draw. Boundaries match game.json's roomOrder. */
 export function enterRoom(nonce: string, playId: bigint, depth: number, tier: number): Room {

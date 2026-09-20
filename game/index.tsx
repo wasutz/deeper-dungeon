@@ -24,41 +24,56 @@ type Menu = "vendor" | "entrance" | "satchel" | "settings" | "odds" | "verify" |
 type Run = Readonly<{ playId: bigint; nonce: string; commitment: string; rooms: readonly Room[]; depth: number; tier: number }>;
 type Settlement = Readonly<{ name: string; reward: bigint }>;
 type RunRecord = Readonly<{
-  number: number; depth: number; tier: number; pot: bigint; banked: boolean;
-  settlement: Settlement | null; playId: bigint; nonce: string; rooms: readonly Room[];
+  number: number; depth: number; tier: number; pot: bigint; banked: boolean; settlement: Settlement | null;
+  playId: bigint; nonce: string; commitment: string; rooms: readonly Room[];
 }>;
+/**
+ * What the Verify panel is allowed to show. A run in progress has no `nonce`: publishing it
+ * before the last room would let the player hash the rooms ahead and stop one room short of
+ * every trap, which is the whole game.
+ */
+type Proof = Readonly<{ commitment: string; nonce: string | null; playId: bigint; rooms: readonly Room[] }>;
+type Totals = Readonly<{ runs: number; banked: bigint; bestDepth: number; bestPot: bigint }>;
+const NO_TOTALS: Totals = { runs: 0, banked: 0n, bestDepth: 0, bestPot: 0n };
 
 export default function Deeper({ friendId, client, paused }: GameComponentProps) {
   const definition = client.definition;
   const [snapshot, setSnapshot] = useState<GameSnapshot | null>(null);
+  const [backed, setBacked] = useState(false);
   const [menu, setMenu] = useState<Menu>(null);
   const [run, setRun] = useState<Run | null>(null);
   const [phase, setPhase] = useState<DescentPhase>("choice");
   const [settlement, setSettlement] = useState<Settlement | null>(null);
   const [history, setHistory] = useState<readonly RunRecord[]>([]);
-  const [verifying, setVerifying] = useState<RunRecord | Run | null>(null);
+  const [totals, setTotals] = useState<Totals>(NO_TOTALS);
+  const [unsettled, setUnsettled] = useState<Readonly<{ run: Run; banked: boolean }> | null>(null);
+  const [verifying, setVerifying] = useState<Proof | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [muted, setMuted] = useState(true);
   const [reducedMotion, setReducedMotion] = useState(false);
 
+  const motionChosen = useRef(false);
   const sound = useRef<FriendSoundKit | null>(null);
   const locked = useRef(false);
   const epoch = useRef(0);
+  const runCount = useRef(0);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     const version = ++epoch.current;
     sound.current = createFriendSoundKit({ muted: true });
-    setSnapshot(null); setMenu(null); setRun(null); setPhase("choice"); setSettlement(null);
-    setHistory([]); setVerifying(null); setError(""); setMessage(""); setBusy(false); setMuted(true);
+    setSnapshot(null); setBacked(false); setMenu(null); setRun(null); setPhase("choice"); setSettlement(null); setUnsettled(null);
+    setHistory([]); setTotals(NO_TOTALS); setVerifying(null); setError(""); setMessage(""); setBusy(false); setMuted(true);
     locked.current = false;
+    runCount.current = 0;
+    motionChosen.current = false;
     void client.read().then(value => { if (version === epoch.current) setSnapshot(value); }).catch(cause => {
       if (version === epoch.current) setError(cause instanceof Error ? cause.message : "Could not load the dungeon ledger.");
     });
     const preference = window.matchMedia("(prefers-reduced-motion: reduce)");
-    const update = () => setReducedMotion(preference.matches);
+    const update = () => { if (!motionChosen.current) setReducedMotion(preference.matches); };
     update();
     preference.addEventListener("change", update);
     return () => {
@@ -70,6 +85,15 @@ export default function Deeper({ friendId, client, paused }: GameComponentProps)
     };
   }, [client, friendId]);
 
+  // Backing is the SDK's own rule about free stake and reserves; ask it rather than restating it.
+  useEffect(() => {
+    if (!snapshot) return;
+    const version = epoch.current;
+    void client.canBuy(1n)
+      .then(value => { if (version === epoch.current) setBacked(value); })
+      .catch(() => { if (version === epoch.current) setBacked(false); });
+  }, [client, snapshot]);
+
   // A held descent must not resolve while the runtime has the game paused behind a menu.
   useEffect(() => {
     if (!paused || !timer.current) return;
@@ -78,14 +102,18 @@ export default function Deeper({ friendId, client, paused }: GameComponentProps)
     setPhase(current => current === "entering" ? "choice" : current);
   }, [paused]);
 
-  const act = useCallback(async (work: () => Promise<void>, cue?: FriendSoundCue) => {
+  /**
+   * One simulated action at a time. `work` receives `isCurrent` because a Friend switch can land
+   * mid-await: any state it writes after that belongs to a session that no longer exists.
+   */
+  const act = useCallback(async (work: (isCurrent: () => boolean) => Promise<void>, cue?: FriendSoundCue) => {
     if (locked.current || paused) return false;
     const version = epoch.current;
     locked.current = true;
     setBusy(true); setError(""); setMessage("");
     void sound.current?.unlock();
     try {
-      await work();
+      await work(() => version === epoch.current);
       const value = await client.read();
       if (version === epoch.current) { setSnapshot(value); if (cue) sound.current?.play(cue); }
       return true;
@@ -107,21 +135,40 @@ export default function Deeper({ friendId, client, paused }: GameComponentProps)
     setMenu(null);
   }, []);
 
-  /** Close the SDK play for a finished run and record what the ledger paid for the torch. */
+  /**
+   * Close the SDK play for a finished run and record what the ledger paid for the torch. The
+   * outcome screen waits for the settlement: a run announced as banked while its play is still
+   * pending would leave the maximum prize reserved with nothing to release it.
+   */
   const finishRun = useCallback(async (finished: Run, banked: boolean) => {
     const pot = banked ? potFor(finished.tier) : 0n;
-    setPhase(banked ? "banked" : "busted");
-    await act(async () => {
+    const version = epoch.current;
+    setPhase("settling");
+    const settledOk = await act(async isCurrent => {
       const settled = await client.settle(finished.playId);
+      if (!isCurrent()) return;
       const outcome = settled.outcomeId === null ? null : definition.outcomes[settled.outcomeId - 1];
       const result: Settlement | null = outcome ? { name: outcome.name, reward: outcome.reward } : null;
       setSettlement(result);
       setHistory(previous => [{
-        number: previous.length + 1, depth: finished.depth, tier: finished.tier, pot, banked,
-        settlement: result, playId: finished.playId, nonce: finished.nonce, rooms: finished.rooms,
+        number: ++runCount.current, depth: finished.depth, tier: finished.tier, pot, banked,
+        settlement: result, playId: finished.playId, nonce: finished.nonce, commitment: finished.commitment,
+        rooms: finished.rooms,
       }, ...previous].slice(0, 20));
+      setTotals(previous => ({
+        runs: previous.runs + 1, banked: previous.banked + pot,
+        bestDepth: Math.max(previous.bestDepth, finished.depth),
+        bestPot: pot > previous.bestPot ? pot : previous.bestPot,
+      }));
     }, banked ? "reward" : "impact");
+    if (version !== epoch.current) return;
+    if (settledOk) { setUnsettled(null); setPhase(banked ? "banked" : "busted"); }
+    else { setUnsettled({ run: finished, banked }); setPhase("unsettled"); }
   }, [act, client, definition]);
+
+  const retrySettle = useCallback(() => {
+    if (unsettled) void finishRun(unsettled.run, unsettled.banked);
+  }, [unsettled, finishRun]);
 
   const descend = useCallback(() => {
     if (!run || phase !== "choice" || busy || paused || run.depth >= MAX_DEPTH) return;
@@ -146,14 +193,17 @@ export default function Deeper({ friendId, client, paused }: GameComponentProps)
     void finishRun(run, true);
   }, [run, phase, busy, paused, finishRun]);
 
-  const startRun = useCallback(() => void act(async () => {
+  const startRun = useCallback(() => void act(async isCurrent => {
     const current = await client.read();
     if (current.consumables === 0n) await client.buy(1n);
     const [play] = await client.play(1n);
-    beginRun(play.id);
+    if (isCurrent()) beginRun(play.id);
   }, "action-start"), [act, client, beginRun]);
 
-  const leaveDungeon = () => { setRun(null); setPhase("choice"); setSettlement(null); setMenu(null); };
+  const leaveDungeon = () => {
+    setRun(null); setPhase("choice"); setSettlement(null); setUnsettled(null); setVerifying(null); setMenu(null);
+  };
+  const closeMenu = () => { setMenu(null); setVerifying(null); };
 
   if (!snapshot) {
     return <div className="deeper-loading" role={error ? "alert" : "status"}>
@@ -165,13 +215,9 @@ export default function Deeper({ friendId, client, paused }: GameComponentProps)
 
   const maxPrize = maximumPrize(definition);
   const affordable = snapshot.rfBalance >= definition.price;
-  const backed = snapshot.freeStake >= maxPrize && snapshot.freeStake + definition.price >= maxPrize;
   const canBuy = affordable && backed;
   const pending = snapshot.plays.find(play => play.outcomeId === null);
   const caches = snapshot.inventory.reduce((total, amount) => total + amount, 0n);
-  const bestDepth = history.reduce((best, record) => Math.max(best, record.depth), 0);
-  const bestPot = history.reduce((best, record) => record.pot > best ? record.pot : best, 0n);
-  const bankedTotal = history.reduce((total, record) => total + record.pot, 0n);
   const inDungeon = run !== null;
   const worldPaused = paused || inDungeon || menu !== null;
 
@@ -179,21 +225,28 @@ export default function Deeper({ friendId, client, paused }: GameComponentProps)
     {error || message || (busy ? "Waiting for the runtime confirmation…" : "Simulated RF, simulated outcomes.")}
   </p>;
 
+  // The first four columns are indexed by depth and the last by loot tier; the table lines them
+  // up only because both axes run 1-10, so the caption has to say which is which.
   const oddsTable = <table className="deeper-table">
-    <thead><tr><th>Room</th><th>Trap</th><th>Loot</th><th>Empty</th><th>Pot at that tier</th></tr></thead>
+    <caption>Trap, loot and empty are indexed by <b>depth</b>. The pot column is indexed by <b>loot tier</b>.</caption>
+    <thead><tr><th>Room / tier</th><th>Trap</th><th>Loot</th><th>Empty</th><th>Pot at that tier</th></tr></thead>
     <tbody>{ROOMS.map(room => <tr key={room.depth}>
       <td>{room.depth}</td><td>{room.trapBps / 100}%</td><td>{room.lootBps / 100}%</td><td>{room.emptyBps / 100}%</td>
       <td>{rf(potFor(room.depth))}</td>
     </tr>)}</tbody>
   </table>;
 
-  const verifyTarget = verifying ?? run;
+  const runOver = phase === "busted" || phase === "banked";
+  const proofOf = (source: Run | RunRecord, revealed: boolean): Proof => ({
+    commitment: source.commitment, nonce: revealed ? source.nonce : null,
+    playId: source.playId, rooms: source.rooms,
+  });
 
   return <section className="deeper-game" aria-label={definition.name} aria-busy={busy}>
     <div className="deeper-world" inert={worldPaused || undefined}>
       <GameWorld world={SURFACE} spawn={SPAWN} interactions={INTERACTIONS} friendId={friendId}
         paused={worldPaused} reducedMotion={reducedMotion}
-        onInteract={id => openMenu(id === "vendor" ? "vendor" : "entrance")} />
+        onInteract={id => { if (id === "vendor") openMenu("vendor"); else if (id === "staircase") openMenu("entrance"); }} />
       <div className="deeper-hud">
         <span className="deeper-chip"><small>Preview RF</small><strong>{rf(snapshot.rfBalance)}</strong></span>
         <span className="deeper-chip"><small>Torches</small><strong>{snapshot.consumables.toString()}</strong></span>
@@ -201,7 +254,7 @@ export default function Deeper({ friendId, client, paused }: GameComponentProps)
           <small>Satchel</small><strong>{caches.toString()}</strong>
         </button>
         <button type="button" className="deeper-chip" onClick={() => openMenu("runs")}>
-          <small>Best depth</small><strong>{bestDepth || "—"}</strong>
+          <small>Best depth</small><strong>{totals.bestDepth || "—"}</strong>
         </button>
         <button type="button" className="deeper-chip" onClick={() => openMenu("settings")}><small>Menu</small><strong>⚙</strong></button>
       </div>
@@ -212,21 +265,21 @@ export default function Deeper({ friendId, client, paused }: GameComponentProps)
     </div>
 
     {run && <Descent friendId={friendId} depth={run.depth} tier={run.tier} rooms={run.rooms} phase={phase}
-      pot={potFor(run.tier)} paused={paused} busy={busy} reducedMotion={reducedMotion} bestDepth={bestDepth}
-      settlement={phase === "busted" || phase === "banked" ? settlement : null}
-      onDescend={descend} onBank={bank} onVerify={() => { setVerifying(run); openMenu("verify"); }}
-      onLedger={() => openMenu("ledger")}
+      pot={potFor(run.tier)} paused={paused || menu !== null} busy={busy} reducedMotion={reducedMotion}
+      bestDepth={totals.bestDepth} settlement={runOver ? settlement : null}
+      onDescend={descend} onBank={bank} onVerify={() => { setVerifying(proofOf(run, runOver)); openMenu("verify"); }}
+      onLedger={() => openMenu("ledger")} onRetrySettle={retrySettle}
       onAgain={startRun} onLeave={leaveDungeon} />}
 
     {menu && <GameMenu
       title={menu === "vendor" ? "Torch Vendor" : menu === "entrance" ? "Dungeon Entrance" : menu === "satchel" ? "Satchel"
         : menu === "odds" ? "Room odds" : menu === "verify" ? "Verify this run" : menu === "runs" ? "This session"
         : menu === "ledger" ? "Pot and ledger" : "Menu"}
-      onClose={busy ? undefined : () => setMenu(null)}>
+      onClose={busy ? undefined : closeMenu}>
 
       {menu === "vendor" ? <>
-        <p>One <b>Torch</b> costs {rf(definition.price)} and lights exactly one run. It is consumed at the stairs and
-          reserves the maximum prize of {rf(maxPrize)} for the whole descent.</p>
+        <p>One <b>Torch</b> costs {rf(definition.price)} and lights exactly one run. Buying it reserves the maximum
+          prize of {rf(maxPrize)}; the stairs then burn it to commit the run.</p>
         <button type="button" className="rf-frame-primary" disabled={!canBuy || busy || paused}
           onClick={() => void act(() => client.buy(1n), "purchase").then(ok => ok && setMessage("One simulated torch added."))}>
           Buy a torch · {rf(definition.price)}
@@ -237,8 +290,8 @@ export default function Deeper({ friendId, client, paused }: GameComponentProps)
         <button type="button" onClick={() => openMenu("satchel")}>Sell caches</button>
         <button type="button" onClick={() => openMenu("odds")}>Room odds</button>
       </> : menu === "entrance" ? <>
-        <p>The staircase drops ten rooms. Each room is a Dice draw: <b>loot</b> grows the pot, <b>empty</b> costs you
-          nothing but the depth, <b>trap</b> ends the run and the dark keeps everything unbanked.</p>
+        <p>The staircase drops ten rooms. Each room is a committed draw: <b>loot</b> grows the pot, <b>empty</b> costs
+          you nothing but the depth, <b>trap</b> ends the run and the dark keeps everything unbanked.</p>
         <p>Bank after any safe room to keep the pot. The deepest cache is {rf(maxPrize)}.</p>
         {pending && !run && <p role="alert">A torch is still burning from an interrupted run. Close it out before starting another.</p>}
         {pending && !run
@@ -262,36 +315,43 @@ export default function Deeper({ friendId, client, paused }: GameComponentProps)
       </> : menu === "odds" ? <>
         {oddsTable}
         <p>Pot tier follows <b>loot</b> rooms, not depth: an empty room takes you deeper without growing the pot.</p>
-        <p>Optimal stopping pays <b>0.906 RF</b> per {rf(definition.price)} torch — a 9.4% house edge. Runs bust 55.4% of the time.</p>
-      </> : menu === "verify" && verifyTarget ? <>
+        <p>Optimal stopping banks <b>0.906 RF</b> of simulated pot per {rf(definition.price)} torch — a 9.4% edge — and
+          runs bust 55.4% of the time. The cache the ledger actually settles each torch into is worth <b>0.912 RF</b> on
+          average, an 8.8% edge.</p>
+      </> : menu === "verify" && verifying ? <>
         <p>{FAIRNESS.note}</p>
         <p className="deeper-note"><code>{FAIRNESS.roomDraw}</code></p>
         <p className="deeper-note"><code>{FAIRNESS.roomOrder}</code></p>
         <dl className="deeper-proof">
-          <dt>Commitment</dt><dd>sha256(nonce) = {"commitment" in verifyTarget ? verifyTarget.commitment : sha256Hex(verifyTarget.nonce)}</dd>
-          <dt>Nonce</dt><dd>{verifyTarget.nonce}</dd>
-          <dt>Play ID</dt><dd>{verifyTarget.playId.toString()}</dd>
+          <dt>Commitment</dt><dd>sha256(nonce) = {verifying.commitment}</dd>
+          <dt>Nonce</dt><dd>{verifying.nonce ?? "Held until the run ends — publishing it now would reveal every room below you."}</dd>
+          <dt>Play ID</dt><dd>{verifying.playId.toString()}</dd>
         </dl>
         <table className="deeper-table">
           <thead><tr><th>Room</th><th>sha256(nonce:playId:depth)</th><th>Roll</th><th>Result</th></tr></thead>
-          <tbody>{verifyTarget.rooms.map(room => <tr key={room.depth}>
+          <tbody>{verifying.rooms.map(room => <tr key={room.depth}>
             <td>{room.depth}</td><td className="deeper-hash">{room.draw.hash.slice(0, 16)}…</td>
             <td>{room.draw.roll}</td><td>{room.kind}</td>
           </tr>)}</tbody>
         </table>
       </> : menu === "runs" ? <>
-        <p>Best depth <b>{bestDepth || "—"}</b> · best bank <b>{rf(bestPot)}</b> · banked this session <b>{rf(bankedTotal)}</b> over {history.length} runs.</p>
+        <p>Best depth <b>{totals.bestDepth || "—"}</b> · best bank <b>{rf(totals.bestPot)}</b> · banked this
+          session <b>{rf(totals.banked)}</b> over {totals.runs} runs.</p>
         {history.length === 0 ? <p>No runs yet. Buy a torch and take the stairs.</p> : <table className="deeper-table">
+          {totals.runs > history.length && <caption>The last {history.length} of {totals.runs} runs.</caption>}
           <thead><tr><th>Run</th><th>Depth</th><th>Result</th><th>Ledger settled</th><th /></tr></thead>
           <tbody>{history.map(record => <tr key={record.number}>
             <td>{record.number}</td><td>{record.depth}</td>
             <td>{record.banked ? rf(record.pot) : "busted"}</td>
             <td>{record.settlement ? `${record.settlement.name} · ${rf(record.settlement.reward)}` : "—"}</td>
-            <td><button type="button" className="deeper-link" onClick={() => { setVerifying(record); setMenu("verify"); }}>Verify</button></td>
+            <td><button type="button" className="deeper-link"
+              onClick={() => { setVerifying(proofOf(record, true)); setMenu("verify"); }}>Verify</button></td>
           </tr>)}</tbody>
         </table>}
       </> : menu === "ledger" ? <>
-        <p>The run is the game: rooms come from a committed Dice draw and the pot is yours the moment you bank.</p>
+        <p>The run is the game: rooms come from a committed draw made in the frame, and banking locks the pot in at
+          the tier you stopped on. Nothing credits that pot to your balance — the RF you get back comes from the
+          cache below.</p>
         <p>The v0.1 SDK settles one <b>fixed</b> reward per torch, chosen by its own weighted draw. It has no action
           that says &ldquo;pay the pot at the depth this player stopped&rdquo;, so a payout that depends on your
           stop-depth cannot be expressed on-chain yet.</p>
@@ -299,16 +359,18 @@ export default function Deeper({ friendId, client, paused }: GameComponentProps)
           purchase, the torch burn, the {rf(maxPrize)} prize reserve, the per-run settlement and cache redemption.
           Simulated at the game layer: the banked pot.</p>
         <p>They agree in expectation — the published table pays <b>0.912 RF</b> per torch and optimal stopping banks
-          <b>0.906 RF</b> — so a session&rsquo;s banked total and satchel value converge. Closing the gap needs a
-          contract action such as <code>bank(playId, tier)</code>; that is the first item for the on-chain phase.</p>
+          <b>0.906 RF</b> — but they are separate draws, so over a session your banked total and your satchel will
+          differ by however the variance falls. Closing the gap needs a contract action such
+          as <code>bank(playId, tier)</code>; that is the first item for the on-chain phase.</p>
       </> : menu === "settings" ? <>
         <button type="button" aria-pressed={!muted} onClick={() => {
           const next = !muted;
           setMuted(next);
           sound.current?.setMuted(next);
           if (!next) void sound.current?.unlock();
-        }}>{muted ? "Sound off" : "Sound on"}</button>
-        <label><input type="checkbox" checked={reducedMotion} onChange={event => setReducedMotion(event.target.checked)} /> Reduce motion</label>
+        }}>Sound</button>
+        <label><input type="checkbox" checked={reducedMotion}
+          onChange={event => { motionChosen.current = true; setReducedMotion(event.target.checked); }} /> Reduce motion</label>
         <button type="button" onClick={() => openMenu("odds")}>Room odds</button>
         <button type="button" onClick={() => openMenu("runs")}>This session</button>
         <p>All balances, purchases and rewards are simulated. Reloading resets the preview. Wallet connection and
