@@ -16,7 +16,8 @@
     "check:games": "node scripts/check-game.mjs",
     "check:browser": "node scripts/check-browser.mjs",
     "tuning": "node scripts/tuning.mjs",
-    "items": "node scripts/items.mjs"
+    "items": "node scripts/items.mjs",
+    "verify": "node scripts/verify.mjs"
   },
   "dependencies": {
     "@rarefriends/friendsdk": "git+https://github.com/spokesz/friendsdk.git#da4828f8ec49d8ac5c24556908bd4cd653f8db67",
