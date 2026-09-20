@@ -755,6 +755,9 @@ export default function Deeper({ friendId, client, paused }: GameComponentProps)
         <p>Optimal stopping banks <b>0.906 RF</b> of simulated pot per {rf(definition.price)} torch — a 9.4% edge — and
           runs bust 55.4% of the time. The cache the ledger actually settles each torch into is worth <b>0.912 RF</b> on
           average, an 8.8% edge.</p>
+        <p>Both price the bank-or-descend decision on its own. Counting the curio an empty room leaves one time in
+          five, the pot layer as it is actually played returns <b>0.944 RF</b> a torch — a <b>5.65% edge</b>, the one
+          to judge the game by.</p>
       </> : menu === "proof" && verifying ? <>
         <p>{FAIRNESS.note}</p>
         <p className="deeper-note"><code>{FAIRNESS.roomDraw}</code></p>
