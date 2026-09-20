@@ -199,6 +199,8 @@ export default function Deeper({ friendId, client, paused }: GameComponentProps)
   const [loadout, setLoadout] = useState<Carried>([]);
   const [purse, setPurse] = useState(0n);
   const [peeked, setPeeked] = useState<Readonly<{ depth: number; kind: RoomKind }> | null>(null);
+  /** The roll of the room being entered, so its reveal can sweep onto the answer it is holding. */
+  const [sealedRoll, setSealedRoll] = useState<number | null>(null);
   const [tally, setTally] = useState<Tally>(NO_TALLY);
   /** The interaction the Friend is currently walking over to, and will open on arrival. */
   const [approaching, setApproaching] = useState<string | null>(null);
@@ -221,7 +223,7 @@ export default function Deeper({ friendId, client, paused }: GameComponentProps)
     prefetchFriendSprites(friendId);
     setSnapshot(null); setBacked(false); setMenu(null); setRun(null); setPhase("choice"); setSettlement(null); setUnsettled(null);
     setHistory([]); setTotals(NO_TOTALS); setVerifying(null); setError(""); setMessage(""); setBusy(false);
-    setStock({}); setLoadout([]); setPurse(0n); setPeeked(null); setTally(NO_TALLY);
+    setStock({}); setLoadout([]); setPurse(0n); setPeeked(null); setSealedRoll(null); setTally(NO_TALLY);
     locked.current = false;
     runCount.current = 0;
     motionChosen.current = false;
@@ -255,6 +257,7 @@ export default function Deeper({ friendId, client, paused }: GameComponentProps)
     if (!paused || !timer.current) return;
     clearTimeout(timer.current);
     timer.current = null;
+    setSealedRoll(null);
     setPhase(current => current === "entering" ? "choice" : current);
   }, [paused]);
 
@@ -440,27 +443,34 @@ export default function Deeper({ friendId, client, paused }: GameComponentProps)
     if (!run || phase !== "choice" || busy || paused || run.depth >= MAX_DEPTH) return;
     setPhase("entering");
     playCue("anticipation");
+    // Drawn here rather than when the reveal is over. The room is a pure function of a nonce that
+    // was committed before the run began, so reading it early cannot change it -- and the reveal
+    // needs the answer in hand to come to rest on it instead of jumping there afterwards.
+    const drawn = enterRoom(run.nonce, run.playId, run.depth + 1, run.tier, run.carried, intent);
+    // A Lantern changes no result, but it was spent on this room and the record should say so.
+    const room = peeked?.depth === drawn.depth
+      ? { ...drawn, used: ["lantern" as ItemId, ...drawn.used] } : drawn;
     // The peek is cleared by the room that consumes it, not by the attempt to enter one. A pause
     // rewinds a held descent to the choice, and a read the player already paid a Lantern for has
     // to survive that -- otherwise the charge is gone, the room is unentered, and its committed
     // draw gets counted a second time when the descent is made again.
     const resolve = () => {
       timer.current = null;
-      const drawn = enterRoom(run.nonce, run.playId, run.depth + 1, run.tier, run.carried, intent);
-      // A Lantern changes no result, but it was spent on this room and the record should say so.
-      const room = peeked?.depth === drawn.depth
-        ? { ...drawn, used: ["lantern" as ItemId, ...drawn.used] } : drawn;
       const carried = room.used.reduce<Carried>((rest, id) => spend(rest, id), run.carried);
       if (!peeked || peeked.depth !== room.depth) {
         setTally(current => observed(current, room.depth, run.carried, room.natural));
       }
       const next: Run = { ...run, rooms: [...run.rooms, room], depth: room.depth, tier: room.tier, carried };
       setPeeked(null);
+      setSealedRoll(null);
       setRun(next);
       settleRoom(next, room);
     };
     if (reducedMotion) resolve();
-    else timer.current = setTimeout(resolve, ROOM_REVEAL_MS);
+    else {
+      setSealedRoll(room.draw.roll);
+      timer.current = setTimeout(resolve, ROOM_REVEAL_MS);
+    }
   }, [run, phase, busy, paused, reducedMotion, peeked, settleRoom, playCue]);
 
   const peek = useCallback(() => {
@@ -635,7 +645,8 @@ export default function Deeper({ friendId, client, paused }: GameComponentProps)
     </div>
 
     {run && <Descent friendId={friendId} depth={run.depth} tier={run.tier} rooms={run.rooms} phase={phase}
-      pot={potFor(run.tier, run.carried)} carried={run.carried} peeked={peeked?.kind ?? null} found={found}
+      pot={potFor(run.tier, run.carried)} carried={run.carried} peeked={peeked?.kind ?? null}
+      sealedRoll={sealedRoll} found={found}
       paused={paused || menu !== null} busy={busy} reducedMotion={reducedMotion}
       bestDepth={totals.bestDepth} settlement={runOver ? settlement : null}
       onDescend={descend} onPeek={peek} onBank={bank}

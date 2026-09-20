@@ -64,12 +64,6 @@ function RoomArt({ depth, seed }: { depth: number; seed: number }) {
 }
 
 /**
- * Where the committed roll landed inside this room's weight ranges, as this loadout sees them.
- * A null roll is the room being entered: the draw is already sealed but not yet read, so the mark
- * sweeps under CSS instead of standing anywhere, and the bar stays out of the accessibility tree
- * rather than naming a position it does not know.
- */
-/**
  * Embers thrown off the sweeping mark. Fixed rather than random: the scatter wants to look
  * unplanned, not to be re-rolled on every render of a bar that is already animating.
  */
@@ -88,8 +82,15 @@ const SPARKS = [
   { x: -2, y: 20, size: 2, hue: 52, delay: 130, life: 560 },
 ] as const;
 
-function DrawBar({ odds, roll }: { odds: RoomOdds; roll: number | null }) {
-  const rolling = roll === null;
+/**
+ * Where the committed roll landed inside this room's weight ranges, as this loadout sees them.
+ *
+ * A rolling bar is the room being entered. Its draw is sealed but not yet read, so the mark sweeps
+ * under CSS and the bar stays out of the accessibility tree rather than naming a position nothing
+ * has arrived at yet -- but the sweep is paced to come to rest on the very roll the room is about
+ * to be read at, so the reveal is the sweep settling rather than the mark changing place.
+ */
+function DrawBar({ odds, roll, rolling }: { odds: RoomOdds; roll: number; rolling: boolean }) {
   return <div className="deeper-range" role={rolling ? undefined : "img"} aria-hidden={rolling || undefined}
     aria-label={rolling ? undefined
       : `Roll ${roll} of 10000. Trap below ${odds.trapBps}, loot below ${odds.trapBps + odds.lootBps}, otherwise empty.`}>
@@ -100,14 +101,17 @@ function DrawBar({ odds, roll }: { odds: RoomOdds; roll: number | null }) {
       <span className="deeper-range-loot" style={{ width: `${odds.lootBps / 100}%` }}>loot</span>
       <span className="deeper-range-empty" style={{ width: `${odds.emptyBps / 100}%` }}>empty</span>
     </div>
-    {rolling
-      ? <i className="deeper-range-mark" data-rolling="">
-        {SPARKS.map((spark, index) => <b key={index} style={{
+    {/* Position is one transform on a full-width rail, so travelling is a composited move rather
+        than a layout pass per frame, and the mark's own transform is left to its shape. */}
+    <div className="deeper-range-rail" data-rolling={rolling || undefined}
+      style={{ "--at": `${roll / 100}%` } as CSSProperties}>
+      <i className="deeper-range-mark">
+        {rolling && SPARKS.map((spark, index) => <b key={index} style={{
           "--x": `${spark.x}px`, "--y": `${spark.y}px`, "--size": `${spark.size}px`,
           "--hue": spark.hue, "--delay": `${spark.delay}ms`, "--life": `${spark.life}ms`,
         } as CSSProperties} />)}
       </i>
-      : <i className="deeper-range-mark" style={{ left: `${roll / 100}%` }} />}
+    </div>
   </div>;
 }
 
@@ -116,6 +120,9 @@ function DrawBar({ odds, roll }: { odds: RoomOdds; roll: number | null }) {
  * lives with the animation rather than with the timer in the host that waits it out.
  */
 export const ROOM_REVEAL_MS = 1500;
+
+/** Where the sweep settles if it was given no roll to land on: the middle of the bar, in bps. */
+const MID_ROLL = 5000;
 
 export type DescentPhase = "choice" | "entering" | "sprung" | "settling" | "unsettled" | "busted" | "banked";
 export type Settlement = Readonly<{ name: string; reward: bigint }>;
@@ -129,6 +136,12 @@ export type DescentProps = {
   pot: bigint;
   carried: Carried;
   peeked: RoomKind | null;
+  /**
+   * The committed roll of the room being entered, so the sweep can land on it. Publishing it a
+   * reveal early gives nothing away that is still in play: the room is already drawn and entered,
+   * and the nonce that would price the rooms *below* stays held until the run ends.
+   */
+  sealedRoll: number | null;
   found: readonly Room[];
   paused: boolean;
   busy: boolean;
@@ -150,8 +163,8 @@ export type DescentProps = {
 
 const VERDICT: Record<RoomKind, string> = { trap: "TRAP", loot: "LOOT", empty: "EMPTY" };
 
-export function Descent({ friendId, depth, tier, rooms, phase, pot, carried, peeked, found, paused, busy,
-  reducedMotion, bestDepth, settlement, onDescend, onPeek, onBank, onRope, onCharm, onAccept,
+export function Descent({ friendId, depth, tier, rooms, phase, pot, carried, peeked, sealedRoll, found,
+  paused, busy, reducedMotion, bestDepth, settlement, onDescend, onPeek, onBank, onRope, onCharm, onAccept,
   onVerify, onLedger, onRetrySettle, onAgain, onLeave }: DescentProps) {
   const last = rooms[rooms.length - 1] ?? null;
   // A curio is spent by the room it was taken into whether or not it changed anything, so what it
@@ -250,13 +263,13 @@ export function Descent({ friendId, depth, tier, rooms, phase, pot, carried, pee
         lands in place rather than the block appearing under the player mid-reveal. */}
     {phase === "entering" ? <div className="deeper-draw">
       <span className="deeper-draw-head">Dice draw · room {nextDepth}</span>
-      <DrawBar odds={oddsFor(nextDepth, carried)} roll={null} />
+      <DrawBar odds={oddsFor(nextDepth, carried)} roll={sealedRoll ?? MID_ROLL} rolling />
       <span className="deeper-draw-foot">
         <span className="deeper-draw-hash">Sealed draw · revealing…</span>
       </span>
     </div> : last && <div className="deeper-draw">
       <span className="deeper-draw-head">Dice draw · room {last.depth}</span>
-      <DrawBar odds={oddsFor(last.depth, carried)} roll={(last.reroll ?? last.draw).roll} />
+      <DrawBar odds={oddsFor(last.depth, carried)} roll={(last.reroll ?? last.draw).roll} rolling={false} />
       <span className="deeper-draw-foot">
         <span className="deeper-draw-hash">
           <b>{(last.reroll ?? last.draw).roll}</b> / 10000 · sha256 {(last.reroll ?? last.draw).hash.slice(0, 8)}…

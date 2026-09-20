@@ -405,34 +405,48 @@ button.deeper-chip:hover, button.deeper-chip:focus-visible { border-color: var(-
 .deeper-range-loot { background: #c8a24a; }
 .deeper-range-empty { background: #4d4437; color: #cbbca6; }
 
+/* The rail spans the track and carries every move the mark makes, as a transform the compositor
+   can run on its own. Its transition is for a mark that changes place with no sweep behind it --
+   a Lucky Charm reroll replacing the roll in the bar it is already standing in. */
+.deeper-range-rail {
+  position: absolute;
+  inset: 0;
+  transform: translateX(var(--at, 50%));
+  transition: transform 320ms cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+
 .deeper-range-mark {
   position: absolute;
+  left: 0;
   top: -5px;
   bottom: -5px;
   width: 5px;
   border-radius: 3px;
   background: #fff;
   box-shadow: 0 0 8px #fff;
-  transform: translateX(-2.5px);
+  transform: translateX(-50%);
   animation: deeper-range-land 260ms ease-out;
 }
 
 /* The draw is committed before the room opens; the sweep is the wait made visible, not the roll
-   being decided. It runs the length of the reveal the host is already holding, so the real mark
-   replaces it exactly as the sweep comes to rest. */
-.deeper-range-mark[data-rolling] {
-  left: 50%;
+   being decided. It runs the length of the reveal the host is already holding and rings down onto
+   the roll it was given, so the mark that replaces it stands exactly where the sweep came to rest.
+   Every waypoint is a change of direction, so each leg eases in and out of its turn: an ease-out
+   on every leg would stop the mark dead at each end and fling it off again. */
+.deeper-range-rail[data-rolling] {
+  animation: deeper-range-sweep var(--reveal, 1500ms) ease-in-out both;
+  transition: none;
+  z-index: 1;
+}
+
+.deeper-range-rail[data-rolling] .deeper-range-mark {
   top: -11px;
   bottom: -11px;
   width: 9px;
   border-radius: 5px;
-  transform: translateX(-4.5px);
   /* The core stays white under the cycling halo: colour reads as heat around the mark without
      costing it contrast against the loot band it spends most of its travel over. */
-  animation:
-    deeper-range-sweep var(--reveal, 1500ms) ease-out both,
-    deeper-range-glow 420ms linear infinite;
-  z-index: 1;
+  animation: deeper-range-glow 420ms linear infinite;
 }
 
 .deeper-range-mark b {
@@ -449,14 +463,19 @@ button.deeper-chip:hover, button.deeper-chip:focus-visible { border-color: var(-
   animation: deeper-range-twinkle var(--life) ease-in-out var(--delay) infinite;
 }
 
+/* A swing that rings down around the roll rather than a tour of fixed points: each pass overshoots
+   by less than the one before and the last of them arrives. The clamps keep a roll near either end
+   of the bar from swinging the mark off the track. */
 @keyframes deeper-range-sweep {
-  0% { left: 50%; }
-  13% { left: 96%; }
-  30% { left: 4%; }
-  50% { left: 88%; }
-  68% { left: 14%; }
-  84% { left: 72%; }
-  100% { left: 40%; }
+  0% { transform: translateX(50%); }
+  14% { transform: translateX(clamp(2%, calc(var(--at) + 44%), 98%)); }
+  31% { transform: translateX(clamp(2%, calc(var(--at) - 36%), 98%)); }
+  47% { transform: translateX(clamp(2%, calc(var(--at) + 27%), 98%)); }
+  62% { transform: translateX(clamp(2%, calc(var(--at) - 19%), 98%)); }
+  75% { transform: translateX(clamp(2%, calc(var(--at) + 12%), 98%)); }
+  86% { transform: translateX(clamp(2%, calc(var(--at) - 6%), 98%)); }
+  94% { transform: translateX(clamp(2%, calc(var(--at) + 2.5%), 98%)); }
+  100% { transform: translateX(var(--at)); }
 }
 
 /* The torch reading a sealed draw, not a result: the mark burns through the palette while it
@@ -476,8 +495,8 @@ button.deeper-chip:hover, button.deeper-chip:focus-visible { border-color: var(-
 }
 
 @keyframes deeper-range-land {
-  from { transform: translateX(-2.5px) scaleY(2.6) scaleX(1.8); box-shadow: 0 0 24px 5px #fff; }
-  to { transform: translateX(-2.5px) scaleY(1) scaleX(1); box-shadow: 0 0 8px #fff; }
+  from { transform: translateX(-50%) scaleY(2.6) scaleX(1.8); box-shadow: 0 0 24px 5px #fff; }
+  to { transform: translateX(-50%) scaleY(1) scaleX(1); box-shadow: 0 0 8px #fff; }
 }
 
 .deeper-choice {
@@ -797,9 +816,11 @@ label.deeper-item[data-on] .rf-game-item-art { color: var(--ember); }
 
 @media (prefers-reduced-motion: reduce) {
   .deeper-pot, .deeper-entering, .deeper-verdict-loot, .deeper-verdict-trap, .deeper-mote,
-  .deeper-descend, .deeper-range-mark, .deeper-range-mark b, .deeper-sprite[data-waiting] {
+  .deeper-descend, .deeper-range-rail, .deeper-range-mark, .deeper-range-mark b,
+  .deeper-sprite[data-waiting] {
     animation: none !important;
   }
+  .deeper-range-rail { transition: none; }
   /* The sign keeps its hover colours; only the movement in it goes. */
   .deeper-world .rf-world-prompt { transition: none; }
   .deeper-world .rf-world-prompt[data-hovered],
@@ -839,7 +860,7 @@ label.deeper-item[data-on] .rf-game-item-art { color: var(--ember); }
   .deeper-range span { font-size: 6px; }
   /* The mark and its embers are sized against the desktop bar. Scaled rather than restated so the
      scatter keeps its proportions instead of crowding the ribbon and the caption around it. */
-  .deeper-range-mark[data-rolling] { transform: translateX(-4.5px) scale(0.7); }
+  .deeper-range-rail[data-rolling] .deeper-range-mark { transform: translateX(-50%) scale(0.7); }
   .deeper-choice { gap: 4px; padding: 2px 0 0; }
   .deeper-odds { font-size: 9px; }
   .deeper-outcome { font-size: 13px; }
