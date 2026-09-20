@@ -393,6 +393,37 @@ try {
     await gameBounds(child);
     await button("Close Room odds").click();
 
+    // Everything above ran with the motion preference set; the reveal itself only exists without
+    // it. The sweep is handed the roll the room is about to be read at, so the mark it leaves
+    // behind has nowhere to jump to -- a rest position that disagrees with the roll warps across
+    // the bar the moment the room opens.
+    await page.emulateMedia({ reducedMotion: "no-preference" });
+    await enterDungeon();
+    await child.getByRole("button", { name: /and descend/ }).click();
+    await confirmIfAsked();
+    await confirmIfAsked();
+    await child.locator(".deeper-descent").waitFor();
+    await child.getByRole("button", { name: /^Descend/ }).click();
+    const sweptTo = await child.locator(".deeper-range-rail[data-rolling]")
+      .evaluate(rail => rail.style.getPropertyValue("--at"));
+    assert.match(sweptTo, /^\d+(\.\d+)?%$/, "The sweep is given a place on the bar to settle onto");
+    // A keyframe the browser cannot resolve is dropped in silence, leaving a mark that is already
+    // sitting on the answer. Sample the travel rather than trust the rule.
+    const travel = await child.locator(".deeper-range-rail[data-rolling]").evaluate(async rail => {
+      const samples = [];
+      for (let tick = 0; tick < 20; tick++) {
+        samples.push(new DOMMatrixReadOnly(getComputedStyle(rail).transform).m41);
+        await new Promise(next => setTimeout(next, 50));
+      }
+      return samples;
+    });
+    assert.ok(Math.max(...travel) - Math.min(...travel) > 40, "The mark sweeps the bar before it settles");
+    await runSettled();
+    assert.equal(
+      await child.locator(".deeper-range-rail").first().evaluate(rail => rail.style.getPropertyValue("--at")),
+      sweptTo, "The revealed mark stands where the sweep came to rest");
+    await gameBounds(child);
+
     await assertBounds(page);
     await page.screenshot({ path: join(tmpdir(), `friendsdk-deeper-${width}.png`) });
     assert.deepEqual([...errors, ...fixture.errors], [], "No uncaught page errors or blocked fixture requests");
