@@ -5,12 +5,12 @@
   "type": "module",
   "license": "UNLICENSED",
   "engines": {
-    "node": ">=22"
+    "node": "22.x"
   },
   "scripts": {
     "postinstall": "node scripts/build-sdk.mjs",
     "dev": "friendsdk dev ./game",
-    "build": "friendsdk build ./game",
+    "build": "friendsdk build ./game --outdir dist",
     "typecheck": "tsc --noEmit",
     "test": "node --test tests/*.test.mjs && node scripts/check-game.mjs",
     "check:games": "node scripts/check-game.mjs",

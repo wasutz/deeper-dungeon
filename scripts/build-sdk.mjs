@@ -15,8 +15,13 @@ if (!existsSync(sdk)) {
   process.exit(1);
 }
 
+// The SDK's build needs its devDependencies (TypeScript), which drag in Playwright. Its browser
+// download is hundreds of megabytes that only the SDK's own browser checks use, and it is the
+// step most likely to blow a CI or deploy install budget.
+const environment = { ...process.env, PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1" };
+
 const npm = process.platform === "win32" ? "npm.cmd" : "npm";
 for (const args of [["install", "--no-audit", "--no-fund"], ["run", "build"]]) {
-  const { status } = spawnSync(npm, ["--prefix", sdk, ...args], { stdio: "inherit" });
+  const { status } = spawnSync(npm, ["--prefix", sdk, ...args], { stdio: "inherit", env: environment });
   if (status !== 0) process.exit(status ?? 1);
 }
