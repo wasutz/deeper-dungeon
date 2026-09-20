@@ -1,0 +1,65 @@
+{
+  "name": "Deeper",
+  "consumable": "Torch",
+  "price": "1000000000000000000",
+  "outcomes": [
+    { "name": "Lost to the dark", "chanceBps": 5534, "reward": "0" },
+    { "name": "Tin Cache", "chanceBps": 2219, "reward": "1100000000000000000" },
+    { "name": "Copper Cache", "chanceBps": 704, "reward": "1400000000000000000" },
+    { "name": "Iron Cache", "chanceBps": 443, "reward": "1900000000000000000" },
+    { "name": "Silver Cache", "chanceBps": 253, "reward": "2800000000000000000" },
+    { "name": "Gold Cache", "chanceBps": 842, "reward": "4850000000000000000" },
+    { "name": "Amber Cache", "chanceBps": 1, "reward": "5650000000000000000" },
+    { "name": "Opal Cache", "chanceBps": 1, "reward": "7000000000000000000" },
+    { "name": "Ruby Cache", "chanceBps": 1, "reward": "9350000000000000000" },
+    { "name": "Obsidian Cache", "chanceBps": 1, "reward": "14250000000000000000" },
+    { "name": "Dragon Hoard", "chanceBps": 1, "reward": "25000000000000000000" }
+  ],
+  "deeper": {
+    "version": "0.1.0",
+    "summary": "Push-your-luck dungeon descent. One torch lights one run. Bank the pot or descend for a bigger one.",
+    "maxDepth": 10,
+    "consumableRules": {
+      "item": "Torch",
+      "price": "1000000000000000000",
+      "perRun": 1,
+      "consumedAt": "the dungeon entrance, when the run is committed",
+      "reserves": "25000000000000000000",
+      "note": "One torch lights one run and reserves the maximum prize (25 RF) for its whole length. Purchased torches stay usable; kept caches keep their fixed RF value with no redemption expiry."
+    },
+    "potLadder": [
+      "1100000000000000000",
+      "1400000000000000000",
+      "1900000000000000000",
+      "2800000000000000000",
+      "4850000000000000000",
+      "5650000000000000000",
+      "7000000000000000000",
+      "9350000000000000000",
+      "14250000000000000000",
+      "25000000000000000000"
+    ],
+    "potLadderNote": "Pot value by loot tier, not by depth. An EMPTY room advances depth without advancing tier, so a deep run can still carry a shallow pot.",
+    "rooms": [
+      { "depth": 1, "trapBps": 1500, "lootBps": 7000, "emptyBps": 1500 },
+      { "depth": 2, "trapBps": 1800, "lootBps": 6700, "emptyBps": 1500 },
+      { "depth": 3, "trapBps": 2200, "lootBps": 6300, "emptyBps": 1500 },
+      { "depth": 4, "trapBps": 2800, "lootBps": 5700, "emptyBps": 1500 },
+      { "depth": 5, "trapBps": 3500, "lootBps": 5000, "emptyBps": 1500 },
+      { "depth": 6, "trapBps": 4200, "lootBps": 4300, "emptyBps": 1500 },
+      { "depth": 7, "trapBps": 5000, "lootBps": 3500, "emptyBps": 1500 },
+      { "depth": 8, "trapBps": 5800, "lootBps": 2700, "emptyBps": 1500 },
+      { "depth": 9, "trapBps": 6500, "lootBps": 2000, "emptyBps": 1500 },
+      { "depth": 10, "trapBps": 7000, "lootBps": 1500, "emptyBps": 1500 }
+    ],
+    "fairness": {
+      "scheme": "commit-reveal",
+      "digest": "sha-256",
+      "commitment": "sha256(runNonce)",
+      "roomDraw": "sha256(runNonce + ':' + playId + ':' + depth) -> first 8 hex digits as uint32 -> roll = value mod 10000",
+      "roomOrder": "roll < trapBps -> TRAP; else roll < trapBps + lootBps -> LOOT; else EMPTY",
+      "note": "The nonce is drawn and committed before the first room, so no room result can react to a BANK or DESCEND choice. The nonce is revealed when the run ends; every room is recomputable from it."
+    },
+    "ledgerNote": "SDK v0.1 pays one fixed reward per settled draw, so a payout that depends on the player's stop depth is not expressible on-chain yet. Torch purchase, torch burn, the 25 RF reserve and cache settlement all run through the SDK client; the banked pot is a labelled simulated reward. See README.md 'Capability gap'."
+  }
+}

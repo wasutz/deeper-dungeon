@@ -1,0 +1,195 @@
+"use client";
+
+import { useEffect, useMemo, type CSSProperties } from "react";
+import { formatGameAmount, Keycap } from "@rarefriends/friendsdk/ui";
+import { FriendSprite } from "./sprite.js";
+import { BAND_NAMES, bandFor, MAX_DEPTH, potFor, ROOMS, type Room } from "./rules.js";
+
+const rf = (value: bigint) => `${formatGameAmount(value, 18)} RF`;
+
+/** Deterministic jitter so a room's silhouette is derived from its own committed draw. */
+function noise(seed: number) {
+  let state = (seed ^ 0x9e3779b9) >>> 0;
+  return () => {
+    state = (state + 0x6d2b79f5) >>> 0;
+    let value = Math.imul(state ^ (state >>> 15), 1 | state);
+    value = (value + Math.imul(value ^ (value >>> 7), 61 | value)) ^ value;
+    return ((value ^ (value >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function RoomArt({ depth, seed }: { depth: number; seed: number }) {
+  const band = bandFor(depth);
+  const shapes = useMemo(() => {
+    const random = noise(seed * 977 + depth);
+    return {
+      teeth: Array.from({ length: 13 }, (_, index) => {
+        const x = 24 + index * 76 + random() * 26;
+        return { x, width: 16 + random() * 20, drop: 22 + random() * 62 };
+      }),
+      rubble: Array.from({ length: 9 }, () => ({ x: random() * 940, width: 26 + random() * 58, height: 6 + random() * 14 })),
+      motes: Array.from({ length: 16 }, () => ({ x: random() * 960, y: 30 + random() * 230, size: 1 + random() * 2.6, delay: random() * 4 })),
+      cracks: Array.from({ length: 5 }, () => ({ x: 60 + random() * 840, y: 196 + random() * 70, run: 40 + random() * 120, lean: random() * 40 - 20 })),
+    };
+  }, [depth, seed]);
+
+  return <svg className="deeper-art" viewBox="0 0 960 340" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
+    <rect width="960" height="340" fill="var(--deep-void)" />
+    <path d="M0 340V116l150-46 160 26 170-44 168 40 154-28 158 42v234z" fill="var(--deep-wall)" />
+    <path d="M110 300V170l90-34 128 20 132-34 130 32 118-22 92 26v142z" fill="var(--deep-back)" />
+    {/* The way down: a darker arch behind the Friend, wider as the shaft opens up. */}
+    <path d={`M${420 - depth * 5} 300v-84a${60 + depth * 4} ${70 + depth * 3} 0 0 1 ${120 + depth * 10} 0v84z`} fill="var(--deep-arch)" />
+    {shapes.teeth.map((tooth, index) =>
+      <path key={index} d={`M${tooth.x} 0h${tooth.width}l${-tooth.width / 2} ${tooth.drop}z`} fill="var(--deep-rock)" />)}
+    {shapes.rubble.map((rock, index) =>
+      <rect key={index} x={rock.x} y={300 - rock.height} width={rock.width} height={rock.height} rx="3" fill="var(--deep-rock)" />)}
+    <rect y="300" width="960" height="40" fill="var(--deep-floor)" />
+
+    {band === 0 && shapes.teeth.slice(0, 8).map((tooth, index) =>
+      <path key={index} d={`M${tooth.x + 4} ${tooth.drop - 4}q6 26 -2 44`} stroke="var(--deep-accent)" strokeWidth="3" fill="none" strokeLinecap="round" />)}
+    {band === 1 && shapes.cracks.map((crack, index) =>
+      <path key={index} d={`M${crack.x} ${crack.y}l${crack.lean} ${-crack.run * 0.5}l${crack.lean * 0.6} ${-crack.run * 0.4}`}
+        stroke="var(--deep-accent)" strokeWidth="2.5" fill="none" strokeLinecap="round" />)}
+    {band === 2 && shapes.cracks.map((crack, index) =>
+      <path key={index} d={`M${crack.x} 300l${crack.lean} ${-crack.run}l${crack.lean * 0.5} ${-crack.run * 0.4}`}
+        stroke="var(--deep-accent)" strokeWidth="4" fill="none" strokeLinecap="round" opacity="0.85" />)}
+    {band === 3 && shapes.motes.map((mote, index) =>
+      <circle key={index} className="deeper-mote" cx={mote.x} cy={mote.y} r={mote.size} fill="var(--deep-accent)"
+        style={{ animationDelay: `${mote.delay}s` }} />)}
+  </svg>;
+}
+
+/** Where the committed roll landed inside this room's published weight ranges. */
+function DrawBar({ depth, roll }: { depth: number; roll: number }) {
+  const room = ROOMS[depth - 1];
+  return <div className="deeper-range" role="img"
+    aria-label={`Roll ${roll} of 10000. Trap below ${room.trapBps}, loot below ${room.trapBps + room.lootBps}, otherwise empty.`}>
+    <span className="deeper-range-trap" style={{ width: `${room.trapBps / 100}%` }}>trap</span>
+    <span className="deeper-range-loot" style={{ width: `${room.lootBps / 100}%` }}>loot</span>
+    <span className="deeper-range-empty" style={{ width: `${room.emptyBps / 100}%` }}>empty</span>
+    <i className="deeper-range-mark" style={{ left: `${roll / 100}%` }} />
+  </div>;
+}
+
+export type DescentPhase = "choice" | "entering" | "busted" | "banked";
+export type Settlement = Readonly<{ name: string; reward: bigint }>;
+
+export type DescentProps = {
+  friendId: bigint;
+  depth: number;
+  tier: number;
+  rooms: readonly Room[];
+  phase: DescentPhase;
+  pot: bigint;
+  paused: boolean;
+  busy: boolean;
+  reducedMotion: boolean;
+  bestDepth: number;
+  settlement: Settlement | null;
+  onDescend: () => void;
+  onBank: () => void;
+  onVerify: () => void;
+  onLedger: () => void;
+  onAgain: () => void;
+  onLeave: () => void;
+};
+
+export function Descent({ friendId, depth, tier, rooms, phase, pot, paused, busy, reducedMotion,
+  bestDepth, settlement, onDescend, onBank, onVerify, onLedger, onAgain, onLeave }: DescentProps) {
+  const last = rooms[rooms.length - 1] ?? null;
+  const atFloor = depth >= MAX_DEPTH;
+  const next = ROOMS[Math.min(depth, MAX_DEPTH - 1)];
+  const nextPot = potFor(tier + 1);
+  const over = phase === "busted" || phase === "banked";
+  const canAct = phase === "choice" && !paused && !busy;
+
+  useEffect(() => {
+    if (paused) return;
+    const onKey = (event: KeyboardEvent) => {
+      const key = event.key.toLowerCase();
+      if (over && (key === "r" || key === "enter")) { event.preventDefault(); onAgain(); return; }
+      if (!canAct) return;
+      if (key === "b" && tier > 0) { event.preventDefault(); onBank(); }
+      if ((key === "d" || key === " ") && !atFloor) { event.preventDefault(); onDescend(); }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [paused, over, canAct, atFloor, tier, onAgain, onBank, onDescend]);
+
+  return <section className="deeper-descent" data-band={bandFor(depth)} data-phase={phase}
+    data-risk={phase === "choice" && !atFloor ? Math.min(4, Math.floor(next.trapBps / 1500)) : 0}
+    aria-label="Dungeon descent" aria-busy={busy}>
+
+    <div className="deeper-descent-bar">
+      <span className="deeper-stat"><small>Depth</small><strong>{depth} <i>/ {MAX_DEPTH}</i></strong></span>
+      <span className="deeper-stat deeper-stat-wide"><small>{BAND_NAMES[bandFor(depth)]}</small>
+        <strong className="deeper-pot" key={pot.toString()}>{rf(pot)}</strong></span>
+      <span className="deeper-stat"><small>Best run</small><strong>{bestDepth || "—"}</strong></span>
+    </div>
+
+    <div className="deeper-chamber">
+      <RoomArt depth={Math.max(1, depth)} seed={last?.draw.roll ?? 0} />
+      <div className="deeper-torch" style={{ "--burn": `${100 - depth * 7}%` } as CSSProperties} />
+      <FriendSprite friendId={friendId} facing="down" walking={phase === "entering"} reducedMotion={reducedMotion} />
+      {phase === "entering" && <p className="deeper-entering" role="status">Entering room {depth + 1}…</p>}
+      {last && phase !== "entering" && <p className={`deeper-verdict deeper-verdict-${last.kind}`} role="status">
+        {last.kind === "trap" ? "TRAP" : last.kind === "loot" ? "LOOT" : "EMPTY"}
+        <small>{last.kind === "trap" ? "The dark keeps the pot."
+          : last.kind === "loot" ? `Pot is now ${rf(potFor(last.tier))}.` : "Nothing here. The pot holds."}</small>
+      </p>}
+    </div>
+
+    <ol className="deeper-ribbon" aria-label="Rooms cleared">
+      {Array.from({ length: MAX_DEPTH }, (_, index) => {
+        const room = rooms[index];
+        return <li key={index} data-kind={room?.kind ?? "unknown"} data-current={index + 1 === depth || undefined}>
+          <span>{index + 1}</span>
+        </li>;
+      })}
+    </ol>
+
+    {last && <div className="deeper-draw">
+      <span className="deeper-draw-head">Dice draw · room {last.depth}</span>
+      <DrawBar depth={last.depth} roll={last.draw.roll} />
+      <span className="deeper-draw-foot">
+        <span className="deeper-draw-hash"><b>{last.draw.roll}</b> / 10000 · sha256 {last.draw.hash.slice(0, 8)}…</span>
+        <button type="button" className="deeper-link" onClick={onVerify}>Verify</button>
+      </span>
+    </div>}
+
+    <div className="deeper-choice">
+      {phase === "busted" ? <>
+        <p className="deeper-outcome deeper-outcome-bust">Lost to the dark at depth {depth}.</p>
+        {settlement && <p className="deeper-ledger">Simulated payout. The v0.1 ledger settled the torch separately
+          as <b>{settlement.name}</b> · {rf(settlement.reward)}.
+          <button type="button" className="deeper-link" onClick={onLedger}>Why?</button></p>}
+        <div className="deeper-buttons">
+          <button type="button" className="deeper-primary" disabled={paused || busy} onClick={onAgain}>Run again <Keycap>R</Keycap></button>
+          <button type="button" disabled={paused || busy} onClick={onLeave}>Back to the ledge</button>
+        </div>
+      </> : phase === "banked" ? <>
+        <p className="deeper-outcome deeper-outcome-bank">Banked {rf(pot)} from depth {depth}.</p>
+        {settlement && <p className="deeper-ledger">Simulated payout. The v0.1 ledger settled the torch separately
+          as <b>{settlement.name}</b> · {rf(settlement.reward)}.
+          <button type="button" className="deeper-link" onClick={onLedger}>Why?</button></p>}
+        <div className="deeper-buttons">
+          <button type="button" className="deeper-primary" disabled={paused || busy} onClick={onAgain}>Run again <Keycap>R</Keycap></button>
+          <button type="button" disabled={paused || busy} onClick={onLeave}>Back to the ledge</button>
+        </div>
+      </> : <>
+        <p className="deeper-odds">
+          {atFloor ? "The dungeon floor. There is nowhere deeper to go."
+            : <>Room {depth + 1} is a <b>{next.trapBps / 100}%</b> trap. Loot takes the pot to <b>{rf(nextPot)}</b>.</>}
+        </p>
+        <div className="deeper-buttons">
+          <button type="button" className="deeper-bank" disabled={!canAct || tier === 0} onClick={onBank}>
+            Bank {rf(pot)} <Keycap>B</Keycap>
+          </button>
+          {!atFloor && <button type="button" className="deeper-descend" disabled={!canAct} onClick={onDescend}>
+            {tier === 0 && depth === 0 ? "Descend" : "Descend — risk it"} <Keycap>D</Keycap>
+          </button>}
+        </div>
+      </>}
+    </div>
+  </section>;
+}

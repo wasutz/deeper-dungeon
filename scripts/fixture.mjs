@@ -1,0 +1,123 @@
+// Wallet, identity and RPC fixture for the automated browser check.
+//
+// Copied verbatim from the SDK's own scripts/check-runtime-browser.mjs (FriendSDK v0.1.0,
+// upstream da4828f) so this project can run the same check without a checkout of the SDK repo.
+// Mock accounts are for automated tests only: the delivered prototype uses the runtime's real
+// ownership gate. Keep this file in step with the SDK's copy when the vendored tarball moves.
+import assert from "node:assert/strict";
+import { decodeFunctionData, encodeFunctionResult, encodeEventTopics, padHex, parseAbi, zeroAddress } from "viem";
+
+const OWNER = "0x1111111111111111111111111111111111111111";
+const SECOND_OWNER = "0x2222222222222222222222222222222222222222";
+const FRIEND_WALLET = "0x3333333333333333333333333333333333333333";
+const COLLECTION = "0x14C49e6118F46525dE9ab41a51cBAA3c6EBF181D";
+const ABI = parseAbi([
+  "event Transfer(address indexed from, address indexed to, uint256 indexed tokenId)",
+  "function balanceOf(address account) view returns (uint256)",
+  "function ownerOf(uint256 tokenId) view returns (address)",
+  "function generation(uint256 tokenId) view returns (uint8)",
+  "function tokenBoundAccount(uint256 tokenId) view returns (address)",
+]);
+const ownerId = owner => owner.toLowerCase() === OWNER.toLowerCase() ? 7730n : 3412n;
+const tokenOwner = id => id === 7730n ? OWNER : SECOND_OWNER;
+
+export async function installFixture(page, origin, { artworkCall } = {}) {
+  const state = { mode: "eligible", requests: [], ownerReads: 0, hold: null, release: null };
+  await page.addInitScript(({ owner }) => {
+    // Internal automation is the only place an account/identity may be mocked.
+    const listeners = new Map();
+    const state = { accounts: [], chainId: "0x1237", requests: [] };
+    const emit = (event, value) => { for (const listener of listeners.get(event) ?? []) listener(value); };
+    window.ethereum = {
+      async request({ method }) {
+        state.requests.push(method);
+        if (method === "eth_accounts") return state.accounts;
+        if (method === "eth_requestAccounts") { state.accounts = [owner]; return state.accounts; }
+        if (method === "eth_chainId") return state.chainId;
+        throw new Error(`Unexpected signing or wallet method: ${method}`);
+      },
+      on(event, listener) { if (!listeners.has(event)) listeners.set(event, new Set()); listeners.get(event).add(listener); },
+      removeListener(event, listener) { listeners.get(event)?.delete(listener); },
+    };
+    window.__friendWalletTest = {
+      state,
+      accounts(accounts) { state.accounts = accounts; emit("accountsChanged", accounts); },
+      chain(chainId) { state.chainId = chainId; emit("chainChanged", chainId); },
+      disconnect() { state.accounts = []; emit("disconnect", { code: 4900, message: "Fixture disconnected" }); },
+    };
+    const random = crypto.getRandomValues.bind(crypto);
+    crypto.getRandomValues = array => array instanceof Uint32Array && array.length === 1 ? (array[0] = 1500, array) : random(array);
+  }, { owner: OWNER });
+
+  async function answer(request) {
+    state.requests.push(request);
+    if (state.mode === "loading") await state.hold;
+    if (state.mode === "rpc-error") return { jsonrpc: "2.0", id: request.id, error: { code: -32001, message: "Fixture RPC unavailable" } };
+    let result;
+    if (request.method === "eth_chainId") result = "0x1237";
+    else if (request.method === "eth_blockNumber") result = "0x100";
+    else if (request.method === "eth_getLogs") {
+      const filter = request.params[0];
+      assert.equal(filter.address.toLowerCase(), COLLECTION.toLowerCase());
+      assert(filter.topics?.[1] || filter.topics?.[2], "Discovery must filter Transfer logs by the connected owner");
+      const topic = filter.topics[2] || filter.topics[1];
+      assert([padHex(OWNER, { size: 32 }), padHex(SECOND_OWNER, { size: 32 })].includes(topic.toLowerCase()), "Only owner-indexed history is allowed");
+      const owner = `0x${topic.slice(-40)}`;
+      result = filter.topics[1] ? [] : [{ address: COLLECTION, blockNumber: "0x10", blockHash: padHex("0x10", { size: 32 }),
+        data: "0x", logIndex: "0x0", transactionHash: padHex("0x1234", { size: 32 }), transactionIndex: "0x0", removed: false,
+        topics: encodeEventTopics({ abi: ABI, eventName: "Transfer", args: { from: zeroAddress, to: owner, tokenId: ownerId(owner) } }) }];
+    } else if (request.method === "eth_call") {
+      if (request.params[0].to.toLowerCase() !== COLLECTION.toLowerCase()) {
+        assert.equal(typeof artworkCall, "function", "Read only the pinned collection unless artwork is explicitly mocked");
+        result = await artworkCall(request.params[0]);
+      } else {
+        const { functionName, args } = decodeFunctionData({ abi: ABI, data: request.params[0].data });
+        let value;
+        if (functionName === "balanceOf") value = state.mode === "unowned" ? 0n : 1n;
+        else {
+          assert([7730n, 3412n].includes(args[0]), "Do not enumerate token IDs or scan the collection");
+          if (functionName === "ownerOf") {
+            state.ownerReads++;
+            value = state.mode === "owner-changed" && state.ownerReads > 1 ? SECOND_OWNER : tokenOwner(args[0]);
+          } else if (functionName === "generation") value = state.mode === "unhardwired" ? 0 : 1;
+          else if (functionName === "tokenBoundAccount") value = FRIEND_WALLET;
+          else throw new Error(`Unsupported collection read ${functionName}`);
+        }
+        result = encodeFunctionResult({ abi: ABI, functionName, result: value });
+      }
+    } else throw new Error(`Unexpected public RPC method: ${request.method}`);
+    return { jsonrpc: "2.0", id: request.id, result };
+  }
+  await page.route("**/*", async route => {
+    const url = route.request().url();
+    if (url.startsWith(origin) || url.startsWith("blob:") || url.startsWith("data:")) return route.continue();
+    assert.equal(new URL(url).hostname, "rpc.mainnet.chain.robinhood.com", "No external app, indexer key or developer service is required");
+    if (route.request().method() === "OPTIONS") return route.fulfill({ status: 204, headers: {
+      "access-control-allow-origin": "*", "access-control-allow-methods": "POST,OPTIONS", "access-control-allow-headers": "content-type",
+    } });
+    const request = route.request().postDataJSON();
+    const response = Array.isArray(request) ? await Promise.all(request.map(answer)) : await answer(request);
+    return route.fulfill({ json: response, headers: { "access-control-allow-origin": "*" } });
+  });
+  return state;
+}
+
+export async function assertBounds(page) {
+  assert.deepEqual(await page.evaluate(() => {
+    const frame = document.querySelector(".rf-game-frame"), problems = [];
+    if (!frame) return ["Missing standard SDK frame"];
+    if (document.querySelectorAll(".rf-game-frame").length !== 1) problems.push("Nested SDK frames");
+    const bounds = frame.getBoundingClientRect();
+    if (Math.abs(bounds.width / bounds.height - 1.5) > .01) problems.push("Changed 960:640 aspect ratio");
+    if (document.documentElement.scrollWidth > innerWidth) problems.push("Page overflow");
+    if ([...document.querySelectorAll("nav,footer")].some(node => !frame.contains(node))) problems.push("Unrequested website scaffolding");
+    for (const node of document.querySelectorAll("button,input,select,iframe")) {
+      if (!frame.contains(node)) problems.push("Control outside game container");
+    }
+    for (const node of document.querySelectorAll(".rf-frame-menu")) {
+      const box = node.getBoundingClientRect();
+      if (box.left < bounds.left - 1 || box.right > bounds.right + 1 || box.top < bounds.top - 1 || box.bottom > bounds.bottom + 1) problems.push("Menu escaped container");
+    }
+    return problems;
+  }), []);
+}

@@ -1,0 +1,32 @@
+{
+  "name": "deeper-submission",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "license": "UNLICENSED",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "friendsdk dev ./game",
+    "build": "friendsdk build ./game",
+    "typecheck": "tsc --noEmit",
+    "test": "node --test tests/*.test.mjs",
+    "check:games": "node scripts/check-game.mjs",
+    "check:browser": "node scripts/check-browser.mjs",
+    "tuning": "node scripts/tuning.mjs"
+  },
+  "dependencies": {
+    "@rarefriends/friendsdk": "file:vendor/rarefriends-friendsdk-0.1.0.tgz",
+    "react": "19.2.8",
+    "react-dom": "19.2.8"
+  },
+  "devDependencies": {
+    "@types/react": "19.1.12",
+    "@types/react-dom": "19.1.9",
+    "typescript": "6.0.3",
+    "playwright": "1.63.0",
+    "viem": "2.56.3",
+    "esbuild": "0.28.2"
+  }
+}
