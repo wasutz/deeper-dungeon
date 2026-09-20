@@ -9,15 +9,24 @@ connection, owned-Friend selection, the fresh ownership gate, in-frame confirmat
 sandboxed 960 × 640 container. This game adds no navigation, headers, footers, About/Store pages
 or a separate wallet flow.
 
+## Play it
+
+**<https://deeper-dungeon.vercel.app>** — the built game, deployed from `main`.
+
+It needs a browser wallet holding a hardwired Rare Friends Generations NFT (generation ≥ 1) on
+Robinhood mainnet (chain 4663): the SDK verifies ownership before play, and a wallet without an
+eligible Friend is told so rather than let in. Nothing is funded and nothing is signed — no RF
+leaves your wallet and no transaction is submitted, because every purchase, balance and reward is
+simulated. The preview keeps session state in memory only, so a reload starts a fresh session.
+
 ## Run it
 
-Node.js 22+ and a browser wallet holding a hardwired Rare Friends Generations NFT
-(generation ≥ 1) on Robinhood mainnet (4663). `npm ci` downloads the SDK's published release
-archive, so the first install needs network access.
+Node.js 22+ and the same wallet. `npm ci` downloads the SDK's published release archive, so the
+first install needs network access.
 
 ```sh
-git clone https://github.com/wasutz/deeper.git
-cd deeper
+git clone https://github.com/wasutz/deeper-dungeon.git
+cd deeper-dungeon
 npm ci
 npm run dev
 ```
@@ -62,9 +71,11 @@ at the exact client coordinates the destination projects to. Neither interaction
 ground — the stall is a solid crate, the staircase is a hole — so each one's destination is resolved
 once, at load, to the nearest spot the navigator accepts that still counts as being there.
 
-Sound is off by default; mute, reduced motion, the odds table and the session log live in the
-**Menu** chip. Reduced motion is picked up from the OS and resolves rooms instantly. Movement and
-every dungeon choice lock while the runtime's `paused` prop is true.
+Sound is on by default; mute, reduced motion, the odds table and the session log live in the
+**Menu** chip. The chip belongs to the ledge, and a descent makes the ledge inert, so those toggles
+are reachable between runs rather than during one. Reduced motion is picked up from the OS and
+resolves rooms instantly. Movement and every dungeon choice lock while the runtime's `paused` prop
+is true.
 
 ## The loop
 
@@ -199,8 +210,9 @@ Two consequences follow the solver rather than taste:
 Curios interact, and the solver prices each standalone, so some pairs are better than their parts
 and some are worse. Both are published rather than tuned away:
 
-- **Divining Rod + Lucky Charm** is superadditive by 21% and returns **+0.23 RF** over its price —
-  the strongest legal loadout at 3.00× baseline, and the build worth finding.
+- **Divining Rod + Lucky Charm** is superadditive by 21% and returns **+0.2288 RF** over its price —
+  the strongest legal loadout by total gain, 3.00× baseline, and the build worth finding. Loot Sack +
+  Lucky Charm is the same shape one step behind: 0.0007 RF less gain, 0.0009 RF more over its price.
 - **Escape Rope + Lantern** is 15% *sub*additive: a rope caps what a trap costs you, so
   foreknowledge of one is worth less. The Lantern still adds 0.154 RF beside a rope, against 0.251
   standalone — 39% less, not nothing.
@@ -226,12 +238,17 @@ average payout when banked 2.0311 RF
 maximum prize              25 RF
 ```
 
+Both of those price **the bank-or-descend decision alone, before curio drops**. The shipped game
+also leaves a curio worth 0.4458 RF in one empty room in five, which is paid for out of the same
+edge: the pot layer as actually played returns **0.9435 RF at a 5.65% edge** (the drop table above).
+Quote 9.41% for the stopping problem and 5.65% for the game.
+
 The ladder is built against each room's break-even growth, `(1 − empty) / loot`. Up to tier 5 every
 step clears break-even by a hair, so descending is correct but only just — that razor edge is the
 game. Past tier 5 growth is held below break-even, so the deep rooms pay spectacularly without ever
-being the right call. A player following that line never enters room 6 at all — the reach column
-above reads 0.00% from depth 6 down, and tiers 6-10 carry the 1 bp floor the weights give them so
-they stay representable. One who ignores it and descends every room clears room 6 about 14.8% of the
+being the right call. A player following that line practically never enters room 6 — it takes
+five empty rooms in a row, 0.0076% of runs, which the reach column above rounds to 0.00% from depth
+6 down, and tiers 6-10 carry the 1 bp floor the weights give them so they stay representable. One who ignores it and descends every room clears room 6 about 14.8% of the
 time (25.4% are still alive to enter it). Either way the 25 RF Dragon Hoard is a lure, not a plan.
 
 ## Provably fair rooms
@@ -364,6 +381,7 @@ adapter, deployment flow, on-chain action or Solidity is implemented here.
 ```sh
 npm ci
 npm run typecheck
+npm run build            # the static bundle the preview is deployed from
 npm test                 # digest, draws, room boundaries, curio effects, the verifier
 npm run check:games      # definition, weights, roll boundaries, economy and item prices
 npx playwright install --with-deps chromium
