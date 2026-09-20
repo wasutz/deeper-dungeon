@@ -18,14 +18,13 @@ import {
   type Carried, type ItemId,
 } from "./items.js";
 import { INTERACTIONS, SPAWN, SURFACE } from "./world.js";
-import { Descent, type DescentPhase } from "./descent.js";
+import { Descent, ROOM_REVEAL_MS, type DescentPhase } from "./descent.js";
 // No SDK stylesheet imports. The runner already supplies frame.css and runtime.css to this
 // document, and the cavern palette replaces world-view.css and ui.css wholesale rather than
 // loading them to override nearly every rule -- see the world-view block in style.css.
 import "./style.css";
 
 const rf = (value: bigint) => `${formatGameAmount(value, 18)} RF`;
-const ROOM_REVEAL_MS = 760;
 
 type Menu = "vendor" | "entrance" | "satchel" | "settings" | "odds" | "proof" | "ledger" | "items" | null;
 

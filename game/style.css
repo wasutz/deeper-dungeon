@@ -279,7 +279,7 @@ button.deeper-chip:hover, button.deeper-chip:focus-visible { border-color: var(-
   font-weight: 700;
 }
 
-.deeper-entering { font-size: 15px; letter-spacing: 0.22em; color: #c9b08a; animation: deeper-breathe 760ms ease-in-out infinite; }
+.deeper-entering { font-size: 15px; letter-spacing: 0.22em; color: #c9b08a; animation: deeper-breathe var(--reveal, 1500ms) ease-in-out infinite; }
 .deeper-verdict small { font-size: 12px; letter-spacing: 0.04em; font-weight: 400; color: #d8c6a8; }
 .deeper-verdict-loot { color: var(--gold); text-shadow: 0 0 22px rgba(255, 212, 121, 0.45); animation: deeper-pop 380ms ease-out; }
 .deeper-verdict-empty { color: #9a8a72; }
@@ -353,8 +353,12 @@ button.deeper-chip:hover, button.deeper-chip:focus-visible { border-color: var(-
 
 .deeper-range {
   position: relative;
-  display: flex;
   height: 14px;
+}
+
+.deeper-range-track {
+  display: flex;
+  height: 100%;
   border-radius: 4px;
   overflow: hidden;
   border: 1px solid #3a2b1c;
@@ -376,12 +380,77 @@ button.deeper-chip:hover, button.deeper-chip:focus-visible { border-color: var(-
 
 .deeper-range-mark {
   position: absolute;
-  top: -3px;
-  bottom: -3px;
-  width: 2px;
+  top: -5px;
+  bottom: -5px;
+  width: 5px;
+  border-radius: 3px;
   background: #fff;
-  box-shadow: 0 0 6px #fff;
-  transform: translateX(-1px);
+  box-shadow: 0 0 8px #fff;
+  transform: translateX(-2.5px);
+  animation: deeper-range-land 260ms ease-out;
+}
+
+/* The draw is committed before the room opens; the sweep is the wait made visible, not the roll
+   being decided. It runs the length of the reveal the host is already holding, so the real mark
+   replaces it exactly as the sweep comes to rest. */
+.deeper-range-mark[data-rolling] {
+  left: 50%;
+  top: -11px;
+  bottom: -11px;
+  width: 9px;
+  border-radius: 5px;
+  transform: translateX(-4.5px);
+  /* The core stays white under the cycling halo: colour reads as heat around the mark without
+     costing it contrast against the loot band it spends most of its travel over. */
+  animation:
+    deeper-range-sweep var(--reveal, 1500ms) ease-out both,
+    deeper-range-glow 420ms linear infinite;
+  z-index: 1;
+}
+
+.deeper-range-mark b {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: var(--size);
+  height: var(--size);
+  margin: calc(var(--size) / -2) 0 0 calc(var(--size) / -2);
+  border-radius: 50%;
+  background: hsl(var(--hue) 100% 72%);
+  box-shadow: 0 0 6px 1px hsl(var(--hue) 100% 60%);
+  opacity: 0;
+  animation: deeper-range-twinkle var(--life) ease-in-out var(--delay) infinite;
+}
+
+@keyframes deeper-range-sweep {
+  0% { left: 50%; }
+  13% { left: 96%; }
+  30% { left: 4%; }
+  50% { left: 88%; }
+  68% { left: 14%; }
+  84% { left: 72%; }
+  100% { left: 40%; }
+}
+
+/* The torch reading a sealed draw, not a result: the mark burns through the palette while it
+   travels and is plain white only once it stands on the roll it actually landed on. */
+@keyframes deeper-range-glow {
+  0% { box-shadow: 0 0 18px 5px #ffb03a, 0 0 6px 1px #fff; }
+  25% { box-shadow: 0 0 20px 6px #e2513c, 0 0 6px 1px #fff; }
+  50% { box-shadow: 0 0 20px 6px #4aa8e0, 0 0 6px 1px #fff; }
+  75% { box-shadow: 0 0 20px 6px #8b5cf0, 0 0 6px 1px #fff; }
+  100% { box-shadow: 0 0 18px 5px #ffb03a, 0 0 6px 1px #fff; }
+}
+
+@keyframes deeper-range-twinkle {
+  0%, 100% { opacity: 0; transform: translate(0, 0) scale(0.2); }
+  30% { opacity: 1; transform: translate(calc(var(--x) * 0.55), calc(var(--y) * 0.55)) scale(1.15); }
+  65% { opacity: 0.85; transform: translate(var(--x), var(--y)) scale(0.75); }
+}
+
+@keyframes deeper-range-land {
+  from { transform: translateX(-2.5px) scaleY(2.6) scaleX(1.8); box-shadow: 0 0 24px 5px #fff; }
+  to { transform: translateX(-2.5px) scaleY(1) scaleX(1); box-shadow: 0 0 8px #fff; }
 }
 
 .deeper-choice {
@@ -701,7 +770,7 @@ label.deeper-item[data-on] .rf-game-item-art { color: var(--ember); }
 
 @media (prefers-reduced-motion: reduce) {
   .deeper-pot, .deeper-entering, .deeper-verdict-loot, .deeper-verdict-trap, .deeper-mote,
-  .deeper-descend {
+  .deeper-descend, .deeper-range-mark, .deeper-range-mark b {
     animation: none !important;
   }
   /* The sign keeps its hover colours; only the movement in it goes. */
@@ -740,6 +809,9 @@ label.deeper-item[data-on] .rf-game-item-art { color: var(--ember); }
   .deeper-draw-head { display: none; }
   .deeper-range { height: 9px; }
   .deeper-range span { font-size: 6px; }
+  /* The mark and its embers are sized against the desktop bar. Scaled rather than restated so the
+     scatter keeps its proportions instead of crowding the ribbon and the caption around it. */
+  .deeper-range-mark[data-rolling] { transform: translateX(-4.5px) scale(0.7); }
   .deeper-choice { gap: 4px; padding: 2px 0 0; }
   .deeper-odds { font-size: 9px; }
   .deeper-outcome { font-size: 13px; }
