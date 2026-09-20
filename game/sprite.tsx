@@ -4,6 +4,19 @@ import { useEffect, useRef, useState } from "react";
 import { createFriendReader, spriteFrame, type GenerationSprites, type SpriteFacing } from "@rarefriends/friendsdk/sprites";
 
 const reader = createFriendReader();
+/**
+ * Artwork outlives the canvas that fetched it. The dungeon mounts its own sprite mid-transition,
+ * and a chain read there leaves the Friend missing from the scene for three round trips -- on the
+ * one moment the player is watching. Prefetching at the start of a session covers the walk to the
+ * stairs, and what a session has already decoded is never read again.
+ */
+const decoded = new Map<string, GenerationSprites>();
+
+export function prefetchFriendSprites(friendId: bigint) {
+  const key = String(friendId);
+  if (decoded.has(key)) return;
+  void reader.read(friendId).then(value => decoded.set(key, value)).catch(() => undefined);
+}
 
 /**
  * The selected Friend's canonical pixels, drawn the way the SDK's world view draws them:
@@ -14,14 +27,21 @@ export function FriendSprite({ friendId, facing = "down", walking = false, reduc
   friendId: bigint; facing?: SpriteFacing; walking?: boolean; reducedMotion?: boolean; className?: string;
 }) {
   const canvas = useRef<HTMLCanvasElement>(null);
-  const [sprites, setSprites] = useState<GenerationSprites | null>(null);
+  const [sprites, setSprites] = useState<GenerationSprites | null>(() => decoded.get(String(friendId)) ?? null);
+  // The render loop reads the latest props without being torn down and rebuilt for each one.
+  // Written in an effect rather than during render: a render may be discarded, and the loop that
+  // survives it would go on drawing from the props of a frame that never reached the screen.
   const live = useRef({ facing, walking, reducedMotion });
-  live.current = { facing, walking, reducedMotion };
+  useEffect(() => { live.current = { facing, walking, reducedMotion }; }, [facing, walking, reducedMotion]);
 
   useEffect(() => {
+    const key = String(friendId), ready = decoded.get(key);
+    if (ready) { setSprites(ready); return; }
     let active = true;
     setSprites(null);
-    void reader.read(friendId).then(value => { if (active) setSprites(value); }).catch(() => undefined);
+    void reader.read(friendId)
+      .then(value => { decoded.set(key, value); if (active) setSprites(value); })
+      .catch(() => undefined);
     return () => { active = false; };
   }, [friendId]);
 
@@ -52,5 +72,6 @@ export function FriendSprite({ friendId, facing = "down", walking = false, reduc
   }, [sprites]);
 
   return <canvas ref={canvas} width={80} height={80} className={`deeper-sprite ${className}`}
+    data-waiting={sprites ? undefined : reducedMotion ? "still" : ""}
     aria-label={sprites ? `Rare Friend #${friendId}` : "Loading Friend artwork"} role="img" />;
 }

@@ -63,16 +63,59 @@ function RoomArt({ depth, seed }: { depth: number; seed: number }) {
   </svg>;
 }
 
-/** Where the committed roll landed inside this room's weight ranges, as this loadout sees them. */
-function DrawBar({ odds, roll }: { odds: RoomOdds; roll: number }) {
-  return <div className="deeper-range" role="img"
-    aria-label={`Roll ${roll} of 10000. Trap below ${odds.trapBps}, loot below ${odds.trapBps + odds.lootBps}, otherwise empty.`}>
-    <span className="deeper-range-trap" style={{ width: `${odds.trapBps / 100}%` }}>trap</span>
-    <span className="deeper-range-loot" style={{ width: `${odds.lootBps / 100}%` }}>loot</span>
-    <span className="deeper-range-empty" style={{ width: `${odds.emptyBps / 100}%` }}>empty</span>
-    <i className="deeper-range-mark" style={{ left: `${roll / 100}%` }} />
+/**
+ * Where the committed roll landed inside this room's weight ranges, as this loadout sees them.
+ * A null roll is the room being entered: the draw is already sealed but not yet read, so the mark
+ * sweeps under CSS instead of standing anywhere, and the bar stays out of the accessibility tree
+ * rather than naming a position it does not know.
+ */
+/**
+ * Embers thrown off the sweeping mark. Fixed rather than random: the scatter wants to look
+ * unplanned, not to be re-rolled on every render of a bar that is already animating.
+ */
+const SPARKS = [
+  { x: -13, y: -11, size: 3.5, hue: 38, delay: 0, life: 620 },
+  { x: 11, y: -14, size: 2.5, hue: 12, delay: 90, life: 540 },
+  { x: -8, y: 13, size: 3, hue: 275, delay: 160, life: 700 },
+  { x: 14, y: 9, size: 2, hue: 200, delay: 240, life: 500 },
+  { x: -17, y: 3, size: 2.5, hue: 52, delay: 310, life: 660 },
+  { x: 17, y: -4, size: 3.5, hue: 320, delay: 80, life: 580 },
+  { x: -5, y: -17, size: 2, hue: 165, delay: 400, life: 620 },
+  { x: 6, y: 16, size: 3, hue: 38, delay: 460, life: 540 },
+  { x: -21, y: -6, size: 2, hue: 275, delay: 200, life: 720 },
+  { x: 21, y: 6, size: 2.5, hue: 12, delay: 350, life: 600 },
+  { x: 2, y: -21, size: 2.5, hue: 200, delay: 520, life: 680 },
+  { x: -2, y: 20, size: 2, hue: 52, delay: 130, life: 560 },
+] as const;
+
+function DrawBar({ odds, roll }: { odds: RoomOdds; roll: number | null }) {
+  const rolling = roll === null;
+  return <div className="deeper-range" role={rolling ? undefined : "img"} aria-hidden={rolling || undefined}
+    aria-label={rolling ? undefined
+      : `Roll ${roll} of 10000. Trap below ${odds.trapBps}, loot below ${odds.trapBps + odds.lootBps}, otherwise empty.`}>
+    {/* The track clips its own segments; the mark rides above it so its glow and embers are not
+        cut off at the 14px the bar itself is tall. */}
+    <div className="deeper-range-track">
+      <span className="deeper-range-trap" style={{ width: `${odds.trapBps / 100}%` }}>trap</span>
+      <span className="deeper-range-loot" style={{ width: `${odds.lootBps / 100}%` }}>loot</span>
+      <span className="deeper-range-empty" style={{ width: `${odds.emptyBps / 100}%` }}>empty</span>
+    </div>
+    {rolling
+      ? <i className="deeper-range-mark" data-rolling="">
+        {SPARKS.map((spark, index) => <b key={index} style={{
+          "--x": `${spark.x}px`, "--y": `${spark.y}px`, "--size": `${spark.size}px`,
+          "--hue": spark.hue, "--delay": `${spark.delay}ms`, "--life": `${spark.life}ms`,
+        } as CSSProperties} />)}
+      </i>
+      : <i className="deeper-range-mark" style={{ left: `${roll / 100}%` }} />}
   </div>;
 }
+
+/**
+ * How long a room takes to open. The sweep across the draw bar is paced off the same number, so it
+ * lives with the animation rather than with the timer in the host that waits it out.
+ */
+export const ROOM_REVEAL_MS = 1500;
 
 export type DescentPhase = "choice" | "entering" | "sprung" | "settling" | "unsettled" | "busted" | "banked";
 export type Settlement = Readonly<{ name: string; reward: bigint }>;
@@ -111,6 +154,9 @@ export function Descent({ friendId, depth, tier, rooms, phase, pot, carried, pee
   reducedMotion, bestDepth, settlement, onDescend, onPeek, onBank, onRope, onCharm, onAccept,
   onVerify, onLedger, onRetrySettle, onAgain, onLeave }: DescentProps) {
   const last = rooms[rooms.length - 1] ?? null;
+  // A curio is spent by the room it was taken into whether or not it changed anything, so what it
+  // was spent on and what it overrode are two different claims. Only the second may say "overridden".
+  const spent = last?.used.map(id => itemFor(id).name).join(" and ") ?? "";
   const atFloor = depth >= MAX_DEPTH;
   const nextDepth = Math.min(depth + 1, MAX_DEPTH);
   const next = oddsFor(nextDepth, carried);
@@ -151,6 +197,7 @@ export function Descent({ friendId, depth, tier, rooms, phase, pot, carried, pee
 
   return <section className="deeper-descent" data-band={bandFor(depth)} data-phase={phase}
     data-risk={phase === "choice" && !atFloor ? Math.min(4, Math.floor(next.trapBps / 1500)) : 0}
+    style={{ "--reveal": `${ROOM_REVEAL_MS}ms` } as CSSProperties}
     aria-label="Dungeon descent" aria-busy={busy}>
 
     <div className="deeper-descent-bar">
@@ -165,12 +212,18 @@ export function Descent({ friendId, depth, tier, rooms, phase, pot, carried, pee
       <div className="deeper-torch" style={{ "--burn": `${100 - depth * 7}%` } as CSSProperties} />
       {satchel}
       <FriendSprite friendId={friendId} facing="down" walking={phase === "entering"} reducedMotion={reducedMotion} />
-      {phase === "entering" && <p className="deeper-entering">Entering room {depth + 1}…</p>}
+      {phase === "entering" && <p className="deeper-entering">
+        <span className="deeper-plate">Entering room {depth + 1}…</span>
+      </p>}
+      {/* The verdict is read against whatever the room happens to look like, and the bands range
+          from near-black to lit orange. It carries its own ground rather than trusting the art. */}
       {last && phase !== "entering" && <p className={`deeper-verdict deeper-verdict-${last.kind}`} aria-hidden="true">
-        {VERDICT[last.kind]}
-        <small>{last.kind === "trap" ? "The dark keeps the pot."
-          : last.kind === "loot" ? `Pot is now ${rf(potFor(last.tier, carried))}.`
-            : last.drop ? `Nothing here but a ${itemFor(last.drop).name} in the rubble.` : "Nothing here. The pot holds."}</small>
+        <span className="deeper-plate">
+          {VERDICT[last.kind]}
+          <small>{last.kind === "trap" ? "The dark keeps the pot."
+            : last.kind === "loot" ? `Pot is now ${rf(potFor(last.tier, carried))}.`
+              : last.drop ? `Nothing here but a ${itemFor(last.drop).name} in the rubble.` : "Nothing here. The pot holds."}</small>
+        </span>
       </p>}
       {/* One region that outlives its own content: a live region mounted with its text already
           in place is not reliably announced. */}
@@ -193,13 +246,23 @@ export function Descent({ friendId, depth, tier, rooms, phase, pot, carried, pee
       })}
     </ol>
 
-    {last && <div className="deeper-draw">
+    {/* The room being entered takes the same slot the room just read leaves behind, so the mark
+        lands in place rather than the block appearing under the player mid-reveal. */}
+    {phase === "entering" ? <div className="deeper-draw">
+      <span className="deeper-draw-head">Dice draw · room {nextDepth}</span>
+      <DrawBar odds={oddsFor(nextDepth, carried)} roll={null} />
+      <span className="deeper-draw-foot">
+        <span className="deeper-draw-hash">Sealed draw · revealing…</span>
+      </span>
+    </div> : last && <div className="deeper-draw">
       <span className="deeper-draw-head">Dice draw · room {last.depth}</span>
       <DrawBar odds={oddsFor(last.depth, carried)} roll={(last.reroll ?? last.draw).roll} />
       <span className="deeper-draw-foot">
         <span className="deeper-draw-hash">
           <b>{(last.reroll ?? last.draw).roll}</b> / 10000 · sha256 {(last.reroll ?? last.draw).hash.slice(0, 8)}…
-          {last.used.length > 0 && <em> · {VERDICT[last.natural].toLowerCase()} overridden by {last.used.map(id => itemFor(id).name).join(" and ")}</em>}
+          {last.used.length > 0 && (last.kind === last.natural
+            ? <em> · {spent} spent, the draw stood</em>
+            : <em> · {VERDICT[last.natural].toLowerCase()} overridden by {spent}</em>)}
         </span>
         <button type="button" className="deeper-link" onClick={onVerify}>Verify</button>
       </span>
@@ -243,8 +306,8 @@ export function Descent({ friendId, depth, tier, rooms, phase, pot, carried, pee
         <p className="deeper-odds">
           {atFloor ? "The dungeon floor. There is nowhere deeper to go."
             : peeked ? <>The Lantern shows room {nextDepth}: <b className={`deeper-peek-${peeked}`}>{VERDICT[peeked]}</b>.
-              {peeked === "loot" ? ` Loot takes the pot to ${rf(nextPot)}.` : peeked === "trap" ? " Walk in and it ends you." : " Nothing down there but the depth."}</>
-            : <>Room {nextDepth} is a <b>{next.trapBps / 100}%</b> trap. Loot takes the pot to <b>{rf(nextPot)}</b>.</>}
+              {peeked === "loot" ? ` Loot pushes the pot to ${rf(nextPot)}.` : peeked === "trap" ? " Walk in and it ends you." : " Nothing down there but the depth."}</>
+            : <>Room {nextDepth}: <b>{(10000 - next.trapBps) / 100}%</b> clear. Loot pushes the pot to <b>{rf(nextPot)}</b>.</>}
         </p>
         <div className="deeper-buttons">
           <button type="button" className="deeper-bank" disabled={!canAct || tier === 0} onClick={onBank}>

@@ -1,8 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import type { GameComponentProps } from "@rarefriends/friendsdk/runtime";
-import { GameWorld } from "@rarefriends/friendsdk/world-view";
+import { GameWorld, type GameWorldInteraction } from "@rarefriends/friendsdk/world-view";
+import { isWorldWalkable, project, type WorldPoint } from "@rarefriends/friendsdk/world";
 import { GameMenu } from "@rarefriends/friendsdk/frame";
 import { formatGameAmount, ItemArt, Keycap } from "@rarefriends/friendsdk/ui";
 import { maximumPrize, type GameSnapshot } from "@rarefriends/friendsdk/game";
@@ -17,16 +18,108 @@ import {
   type Carried, type ItemId,
 } from "./items.js";
 import { INTERACTIONS, SPAWN, SURFACE } from "./world.js";
-import { Descent, type DescentPhase } from "./descent.js";
+import { Descent, ROOM_REVEAL_MS, type DescentPhase } from "./descent.js";
+import { prefetchFriendSprites } from "./sprite.js";
 // No SDK stylesheet imports. The runner already supplies frame.css and runtime.css to this
 // document, and the cavern palette replaces world-view.css and ui.css wholesale rather than
 // loading them to override nearly every rule -- see the world-view block in style.css.
 import "./style.css";
 
 const rf = (value: bigint) => `${formatGameAmount(value, 18)} RF`;
-const ROOM_REVEAL_MS = 760;
 
 type Menu = "vendor" | "entrance" | "satchel" | "settings" | "odds" | "proof" | "ledger" | "items" | null;
+
+/** Which menu an interaction opens, whether it was reached on foot or walked to from across the ledge. */
+const MENU_FOR: Readonly<Record<string, Menu>> = { vendor: "vendor", staircase: "entrance" };
+
+/**
+ * GameWorld draws its 960 x 640 canvas translated by a view origin of its own, and walks the Friend
+ * to wherever a pointer lands on it. Both are private to the SDK, so they are restated here: the
+ * world-to-screen conversion below has to invert the SDK's own exactly, or a prompt would send the
+ * Friend somewhere other than the thing it names. `WALK_RADIUS` is the movement navigator's default
+ * clearance -- a destination it cannot route to moves nobody.
+ */
+const VIEW = { x: 320, y: 330, width: 960, height: 640 };
+const WALK_RADIUS = 7;
+const DEFAULT_REACH = 72;
+/** Close enough to count as standing there, against a position the canvas rounds to 0.01. */
+const ARRIVED = 2;
+/** No movement for this long after a sign was tapped means the walk never started at all. */
+const STALLED_MS = 700;
+/** The SDK's own movement keys, lowercased the way a `keydown` handler compares them. */
+const WALK_KEYS = new Set(["w", "a", "s", "d", "arrowup", "arrowdown", "arrowleft", "arrowright"]);
+
+const reachOf = (item: GameWorldInteraction) => item.reach ?? DEFAULT_REACH;
+const apart = (from: WorldPoint, to: WorldPoint) => Math.hypot(from[0] - to[0], from[1] - to[1]);
+
+/**
+ * Where walking over to something actually puts the Friend. Neither interaction stands on open
+ * ground -- the vendor's stall is a solid crate and the staircase is a hole -- so the destination
+ * is the nearest spot the navigator will accept that still counts as being there. Searched once,
+ * off a fixed world, rather than per click.
+ */
+const standFor = (item: GameWorldInteraction): WorldPoint => {
+  if (isWorldWalkable(SURFACE, item.position, WALK_RADIUS)) return item.position;
+  for (let radius = 8; radius <= reachOf(item); radius += 8) {
+    for (let step = 0; step < 24; step++) {
+      const angle = step / 24 * 2 * Math.PI;
+      const stand: WorldPoint = [
+        item.position[0] + radius * Math.cos(angle), item.position[1] + radius * Math.sin(angle),
+      ];
+      if (isWorldWalkable(SURFACE, stand, WALK_RADIUS)) return stand;
+    }
+  }
+  return item.position;
+};
+const STANDS: ReadonlyMap<string, WorldPoint> = new Map(INTERACTIONS.map(item => [item.id, standFor(item)]));
+
+/**
+ * Which interaction's prompt a tap landed on, by its box rather than by being the tap's target: a
+ * prompt out of reach is `disabled`, and the cavern stylesheet takes it out of the hit test so the
+ * tap can reach the canvas underneath. The SDK renders one prompt per interaction, in order.
+ */
+const promptsIn = (root: HTMLElement) => {
+  const prompts = [...root.querySelectorAll<HTMLElement>(".rf-world-prompt")];
+  return prompts.length === INTERACTIONS.length ? prompts : [];
+};
+
+const promptAt = (root: HTMLElement, x: number, y: number) => {
+  const index = promptsIn(root).findIndex(node => {
+    const box = node.getBoundingClientRect();
+    return x >= box.left && x <= box.right && y >= box.top && y <= box.bottom;
+  });
+  return index < 0 ? null : INTERACTIONS[index];
+};
+
+/**
+ * Light up the sign under the cursor. `:hover` cannot do this: the same `pointer-events: none` that
+ * lets a tap through to the canvas also keeps an out-of-reach sign from ever matching it. The
+ * attribute is set on the SDK's own element rather than passed to it, since GameWorld renders the
+ * prompts itself -- it owns `disabled` and the label, and leaves a foreign `data-` attribute alone.
+ * Marked straight onto the DOM rather than held in state so that moving the mouse across the ledge
+ * does not re-render the game on every frame of it.
+ */
+const markHover = (root: HTMLElement, target: GameWorldInteraction | null) => {
+  for (const [index, node] of promptsIn(root).entries()) {
+    node.toggleAttribute("data-hovered", INTERACTIONS[index] === target);
+  }
+};
+
+/**
+ * Send the Friend to a point. GameWorld keeps its mover private and offers no handle for it, so the
+ * way in is the pointer surface it already listens on: this replays, at the exact client
+ * coordinates the destination projects to, the tap the player would have had to make by hand. The
+ * arithmetic is the inverse of the SDK's own screen-to-world step, so the Friend lands where the
+ * prompt promised rather than near it.
+ */
+const walkTo = (canvas: HTMLCanvasElement, box: DOMRect, point: WorldPoint) => {
+  const [x, y] = project(point[0], point[1]);
+  canvas.dispatchEvent(new PointerEvent("pointerdown", {
+    bubbles: true,
+    clientX: box.left + (x - VIEW.x) * box.width / VIEW.width,
+    clientY: box.top + (y - VIEW.y) * box.height / VIEW.height,
+  }));
+};
 
 type Run = Readonly<{
   playId: bigint; nonce: string; commitment: string; rooms: readonly Room[];
@@ -100,16 +193,22 @@ export default function Deeper({ friendId, client, paused }: GameComponentProps)
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
-  const [muted, setMuted] = useState(true);
+  const [muted, setMuted] = useState(false);
   const [reducedMotion, setReducedMotion] = useState(false);
   const [stock, setStock] = useState<Stock>({});
   const [loadout, setLoadout] = useState<Carried>([]);
   const [purse, setPurse] = useState(0n);
   const [peeked, setPeeked] = useState<Readonly<{ depth: number; kind: RoomKind }> | null>(null);
   const [tally, setTally] = useState<Tally>(NO_TALLY);
+  /** The interaction the Friend is currently walking over to, and will open on arrival. */
+  const [approaching, setApproaching] = useState<string | null>(null);
 
+  const world = useRef<HTMLDivElement>(null);
+  const replaying = useRef(false);
   const motionChosen = useRef(false);
   const sound = useRef<FriendSoundKit | null>(null);
+  /** Survives a Friend switch, which builds a new kit: a player who muted stays muted. */
+  const mutePreference = useRef(false);
   const locked = useRef(false);
   const epoch = useRef(0);
   const runCount = useRef(0);
@@ -117,9 +216,11 @@ export default function Deeper({ friendId, client, paused }: GameComponentProps)
 
   useEffect(() => {
     const version = ++epoch.current;
-    sound.current = createFriendSoundKit({ muted: true });
+    sound.current = createFriendSoundKit({ muted: mutePreference.current });
+    // Read the artwork now, while the Friend is still on the surface, so the dungeon has it.
+    prefetchFriendSprites(friendId);
     setSnapshot(null); setBacked(false); setMenu(null); setRun(null); setPhase("choice"); setSettlement(null); setUnsettled(null);
-    setHistory([]); setTotals(NO_TOTALS); setVerifying(null); setError(""); setMessage(""); setBusy(false); setMuted(true);
+    setHistory([]); setTotals(NO_TOTALS); setVerifying(null); setError(""); setMessage(""); setBusy(false);
     setStock({}); setLoadout([]); setPurse(0n); setPeeked(null); setTally(NO_TALLY);
     locked.current = false;
     runCount.current = 0;
@@ -158,6 +259,16 @@ export default function Deeper({ friendId, client, paused }: GameComponentProps)
   }, [paused]);
 
   /**
+   * `unlock()` is asynchronous and `play()` is silent until it resolves, so a cue fired in the
+   * same tick as the gesture that first unlocks audio would be lost. Every cue goes through here.
+   */
+  const playCue = useCallback((name: FriendSoundCue) => {
+    const kit = sound.current;
+    if (!kit) return;
+    void kit.unlock().then(ready => { if (ready && sound.current === kit) kit.play(name); });
+  }, []);
+
+  /**
    * One simulated action at a time. `work` receives `isCurrent` because a Friend switch can land
    * mid-await: any state it writes after that belongs to a session that no longer exists.
    */
@@ -166,11 +277,10 @@ export default function Deeper({ friendId, client, paused }: GameComponentProps)
     const version = epoch.current;
     locked.current = true;
     setBusy(true); setError(""); setMessage("");
-    void sound.current?.unlock();
     try {
       await work(() => version === epoch.current);
       const value = await client.read();
-      if (version === epoch.current) { setSnapshot(value); if (cue) sound.current?.play(cue); }
+      if (version === epoch.current) { setSnapshot(value); if (cue) playCue(cue); }
       return true;
     } catch (cause) {
       if (version === epoch.current) setError(cause instanceof Error ? cause.message : "The simulated action failed.");
@@ -178,9 +288,84 @@ export default function Deeper({ friendId, client, paused }: GameComponentProps)
     } finally {
       if (version === epoch.current) { locked.current = false; setBusy(false); }
     }
-  }, [client, paused]);
+  }, [client, paused, playCue]);
 
-  const openMenu = (next: Menu) => { if (!busy && !paused) { setMenu(next); setError(""); setMessage(""); } };
+  const openMenu = useCallback((next: Menu) => {
+    if (!busy && !paused) { setMenu(next); setError(""); setMessage(""); }
+  }, [busy, paused]);
+
+  /**
+   * Walking over to something is a standing intention, so it only holds while the ledge is the
+   * thing the player is looking at. A runtime pause, an open menu or a descent all drop it rather
+   * than opening, minutes later, a menu the player has long since moved on from.
+   */
+  const approachHeld = !paused && run === null && menu === null;
+  useEffect(() => { if (!approachHeld) setApproaching(null); }, [approachHeld]);
+
+  /**
+   * A tap on a prompt that is still out of reach walks the Friend over to it and remembers what he
+   * was sent to, so the arrival can open it. The target is the prompt's own box and nothing wider:
+   * the ground around an interaction stays plain walkable floor.
+   */
+  const onWorldPointer = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    // The walk below is itself a pointerdown on the canvas, and it bubbles straight back through here.
+    if (replaying.current) return;
+    // A prompt within reach is a live button and opens on its own click.
+    if ((event.target as Element | null)?.closest?.("button")) return;
+    const canvas = event.currentTarget.querySelector<HTMLCanvasElement>(".rf-world-view canvas");
+    const box = canvas?.getBoundingClientRect();
+    if (!canvas || !box?.width || !box.height) return;
+    const target = promptAt(event.currentTarget, event.clientX, event.clientY);
+    // Anywhere else is the player walking somewhere of their own choosing, which is them changing
+    // their mind about the approach as much as reaching for the keys would be.
+    if (!target) { setApproaching(null); return; }
+    replaying.current = true;
+    try { walkTo(canvas, box, STANDS.get(target.id)!); } finally { replaying.current = false; }
+    setApproaching(target.id);
+  }, []);
+
+  /** Hovering is a mouse idea; a finger is already on the thing it means to press. */
+  const trackHover = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    if (event.pointerType === "touch") return;
+    markHover(event.currentTarget, promptAt(event.currentTarget, event.clientX, event.clientY));
+  }, []);
+
+  // A menu opening takes the world inert from under the cursor, which leaves no pointer event
+  // behind to clear the sign the player was hovering when they clicked it.
+  useEffect(() => {
+    if (!approachHeld && world.current) markHover(world.current, null);
+  }, [approachHeld]);
+
+  /**
+   * Watch for the arrival, reading the position the canvas publishes every frame.
+   *
+   * Arriving means standing at the destination, not merely being close enough for the prompt to
+   * light up: reach is a generous radius, and opening on the edge of it pops the menu while the
+   * Friend is still visibly out on the ledge walking. The navigator ends a route exactly on the
+   * point it was given, so this is a tight test against that point rather than a loose one against
+   * the interaction.
+   */
+  useEffect(() => {
+    const item = INTERACTIONS.find(entry => entry.id === approaching);
+    const canvas = world.current?.querySelector<HTMLCanvasElement>(".rf-world-view canvas");
+    const target = item && MENU_FOR[item.id];
+    if (!item || !canvas || !target) return;
+    const stand = STANDS.get(item.id)!;
+    let frame = 0, moving = performance.now(), previous: WorldPoint | null = null;
+    const check = (now: number) => {
+      const position: WorldPoint = [Number(canvas.dataset.x), Number(canvas.dataset.y)];
+      if (position.every(Number.isFinite)) {
+        if (apart(position, stand) <= ARRIVED) { setApproaching(null); openMenu(target); return; }
+        if (previous && apart(position, previous) > 0.01) moving = now;
+        previous = position;
+        // Nothing is coming: the route was refused, so there is no arrival to wait for.
+        if (now - moving > STALLED_MS) { setApproaching(null); return; }
+      }
+      frame = requestAnimationFrame(check);
+    };
+    frame = requestAnimationFrame(check);
+    return () => cancelAnimationFrame(frame);
+  }, [approaching, openMenu]);
 
   /**
    * A loadout is spent by the run it is carried into, used or not. That is what the solver prices:
@@ -213,8 +398,11 @@ export default function Deeper({ friendId, client, paused }: GameComponentProps)
       const outcome = settled.outcomeId === null ? null : definition.outcomes[settled.outcomeId - 1];
       const result: Settlement | null = outcome ? { name: outcome.name, reward: outcome.reward } : null;
       setSettlement(result);
+      // Numbered here rather than inside the updater: React may call an updater more than once,
+      // and a run number that counts re-renders is a run number that skips.
+      const number = ++runCount.current;
       setHistory(previous => [{
-        number: ++runCount.current, depth: finished.depth, tier: finished.tier, pot, banked,
+        number, depth: finished.depth, tier: finished.tier, pot, banked,
         settlement: result, playId: finished.playId, nonce: finished.nonce, commitment: finished.commitment,
         rooms: finished.rooms, carried: carriedInto,
       }, ...previous].slice(0, 20));
@@ -240,20 +428,22 @@ export default function Deeper({ friendId, client, paused }: GameComponentProps)
   const settleRoom = useCallback((next: Run, room: Room) => {
     if (room.drop) setStock(current => restock(current, room.drop!, 1));
     if (room.kind === "trap") {
-      if (canAnswerTrap(next.carried)) { sound.current?.play("impact"); setPhase("sprung"); return; }
+      if (canAnswerTrap(next.carried)) { playCue("impact"); setPhase("sprung"); return; }
       void finishRun(next, false, 0n);
       return;
     }
-    sound.current?.play(room.kind === "loot" ? (room.depth >= 6 ? "reveal-rare" : "reveal-common") : "action-ready");
+    playCue(room.kind === "loot" ? (room.depth >= 6 ? "reveal-rare" : "reveal-common") : "action-ready");
     setPhase("choice");
-  }, [finishRun]);
+  }, [finishRun, playCue]);
 
   const descend = useCallback((intent: Intent = {}) => {
     if (!run || phase !== "choice" || busy || paused || run.depth >= MAX_DEPTH) return;
     setPhase("entering");
-    setPeeked(null);
-    void sound.current?.unlock();
-    sound.current?.play("anticipation");
+    playCue("anticipation");
+    // The peek is cleared by the room that consumes it, not by the attempt to enter one. A pause
+    // rewinds a held descent to the choice, and a read the player already paid a Lantern for has
+    // to survive that -- otherwise the charge is gone, the room is unentered, and its committed
+    // draw gets counted a second time when the descent is made again.
     const resolve = () => {
       timer.current = null;
       const drawn = enterRoom(run.nonce, run.playId, run.depth + 1, run.tier, run.carried, intent);
@@ -265,16 +455,19 @@ export default function Deeper({ friendId, client, paused }: GameComponentProps)
         setTally(current => observed(current, room.depth, run.carried, room.natural));
       }
       const next: Run = { ...run, rooms: [...run.rooms, room], depth: room.depth, tier: room.tier, carried };
+      setPeeked(null);
       setRun(next);
       settleRoom(next, room);
     };
     if (reducedMotion) resolve();
     else timer.current = setTimeout(resolve, ROOM_REVEAL_MS);
-  }, [run, phase, busy, paused, reducedMotion, peeked, settleRoom]);
+  }, [run, phase, busy, paused, reducedMotion, peeked, settleRoom, playCue]);
 
   const peek = useCallback(() => {
-    if (!run || phase !== "choice" || busy || paused || !holds(run.carried, "lantern")) return;
-    const depth = Math.min(run.depth + 1, MAX_DEPTH);
+    // The floor guard is the same one `descend` keeps: clamping instead would re-read the room
+    // already entered, spending the Lantern on it and counting its draw twice.
+    if (!run || phase !== "choice" || busy || paused || run.depth >= MAX_DEPTH || !holds(run.carried, "lantern")) return;
+    const depth = run.depth + 1;
     const kind = peekRoom(run.nonce, run.playId, depth, run.carried);
     // Counted here rather than on entry. A peek that talks you out of descending would otherwise
     // drop its own draw from the tally, and a draw included only when the player liked the look of
@@ -282,8 +475,8 @@ export default function Deeper({ friendId, client, paused }: GameComponentProps)
     setTally(current => observed(current, depth, run.carried, kind));
     setPeeked({ depth, kind });
     setRun({ ...run, carried: spend(run.carried, "lantern") });
-    sound.current?.play("action-ready");
-  }, [run, phase, busy, paused]);
+    playCue("action-ready");
+  }, [run, phase, busy, paused, playCue]);
 
   const bank = useCallback(() => {
     if (!run || phase !== "choice" || busy || paused || run.tier === 0) return;
@@ -336,9 +529,16 @@ export default function Deeper({ friendId, client, paused }: GameComponentProps)
     if (busy || paused || purse < item.price) return;
     setPurse(previous => previous - item.price);
     setStock(current => restock(current, id, 1));
-    sound.current?.play("purchase");
+    playCue("purchase");
     setMessage(`${item.name} added to the satchel.`);
-  }, [busy, paused, purse]);
+  }, [busy, paused, purse, playCue]);
+
+  const setSoundOn = useCallback((on: boolean) => {
+    mutePreference.current = !on;
+    setMuted(!on);
+    sound.current?.setMuted(!on);
+    if (on) void sound.current?.unlock();
+  }, []);
 
   const leaveDungeon = () => {
     setRun(null); setPhase("choice"); setSettlement(null); setUnsettled(null); setVerifying(null); setMenu(null);
@@ -407,10 +607,15 @@ export default function Deeper({ friendId, client, paused }: GameComponentProps)
   });
 
   return <section className="deeper-game" aria-label={definition.name} aria-busy={busy}>
-    <div className="deeper-world" inert={worldPaused || undefined}>
+    {/* Steering by hand is the player changing their mind: the walk they queued stops being what
+        they want the moment they take the controls back. */}
+    <div className="deeper-world" ref={world} inert={worldPaused || undefined} onPointerDown={onWorldPointer}
+      data-approaching={approaching ?? undefined}
+      onPointerMove={trackHover} onPointerLeave={event => markHover(event.currentTarget, null)}
+      onKeyDown={event => { if (WALK_KEYS.has(event.key.toLowerCase())) setApproaching(null); }}>
       <GameWorld world={SURFACE} spawn={SPAWN} interactions={INTERACTIONS} friendId={friendId}
         paused={worldPaused} reducedMotion={reducedMotion}
-        onInteract={id => { if (id === "vendor") openMenu("vendor"); else if (id === "staircase") openMenu("entrance"); }} />
+        onInteract={id => { const target = MENU_FOR[id]; if (target) openMenu(target); }} />
       <div className="deeper-hud">
         <span className="deeper-chip"><small>Preview RF</small><strong>{rf(snapshot.rfBalance)}</strong></span>
         <span className="deeper-chip"><small>Torches</small><strong>{snapshot.consumables.toString()}</strong></span>
@@ -424,8 +629,8 @@ export default function Deeper({ friendId, client, paused }: GameComponentProps)
         <button type="button" className="deeper-chip" onClick={() => openMenu("settings")}><small>Menu</small><strong>⚙</strong></button>
       </div>
       <p className="deeper-hint">
-        <span className="deeper-desktop">WASD / arrows to walk · tap a spot to move · <Keycap>E</Keycap> at the vendor or the stairs</span>
-        <span className="deeper-mobile">Tap to walk · tap a prompt to interact</span>
+        <span className="deeper-desktop">WASD / arrows to walk · tap a spot to move · tap a sign to walk over and open it · <Keycap>E</Keycap> once you are there</span>
+        <span className="deeper-mobile">Tap to walk · tap a sign to walk over and open it</span>
       </p>
     </div>
 
@@ -653,12 +858,8 @@ export default function Deeper({ friendId, client, paused }: GameComponentProps)
           differ by however the variance falls. Closing the gap needs a contract action such
           as <code>bank(playId, tier)</code>; that is the first item for the on-chain phase.</p>
       </> : menu === "settings" ? <>
-        <button type="button" aria-pressed={!muted} onClick={() => {
-          const next = !muted;
-          setMuted(next);
-          sound.current?.setMuted(next);
-          if (!next) void sound.current?.unlock();
-        }}>Sound</button>
+        <label><input type="checkbox" checked={!muted}
+          onChange={event => setSoundOn(event.target.checked)} /> Sound</label>
         <label><input type="checkbox" checked={reducedMotion}
           onChange={event => { motionChosen.current = true; setReducedMotion(event.target.checked); }} /> Reduce motion</label>
         <button type="button" onClick={() => openMenu("odds")}>Room odds</button>
