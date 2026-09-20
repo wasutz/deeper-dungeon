@@ -264,6 +264,18 @@ button.deeper-chip:hover, button.deeper-chip:focus-visible { border-color: var(-
   filter: drop-shadow(0 0 16px rgba(255, 178, 77, 0.45));
 }
 
+/* Only the genuinely cold path reaches this: artwork not yet decoded when the dungeon opens. */
+.deeper-sprite[data-waiting] {
+  background: radial-gradient(ellipse at 50% 60%, rgba(255, 178, 77, 0.22), rgba(255, 178, 77, 0) 70%);
+  filter: none;
+}
+.deeper-sprite[data-waiting=""] { animation: deeper-sprite-waiting 1.3s ease-in-out infinite; }
+
+@keyframes deeper-sprite-waiting {
+  0%, 100% { opacity: 0.35; }
+  50% { opacity: 0.75; }
+}
+
 .deeper-entering, .deeper-verdict {
   position: absolute;
   left: 0;
@@ -785,7 +797,7 @@ label.deeper-item[data-on] .rf-game-item-art { color: var(--ember); }
 
 @media (prefers-reduced-motion: reduce) {
   .deeper-pot, .deeper-entering, .deeper-verdict-loot, .deeper-verdict-trap, .deeper-mote,
-  .deeper-descend, .deeper-range-mark, .deeper-range-mark b {
+  .deeper-descend, .deeper-range-mark, .deeper-range-mark b, .deeper-sprite[data-waiting] {
     animation: none !important;
   }
   /* The sign keeps its hover colours; only the movement in it goes. */

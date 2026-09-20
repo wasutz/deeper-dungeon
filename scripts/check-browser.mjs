@@ -23,7 +23,9 @@ const section = source.split('"7730": decodeGenerationSprites')[1].split("]),")[
 const frames = [...section.matchAll(/0x[0-9a-f]+n/g)].map(([word]) => BigInt(word.slice(0, -1)));
 assert.equal(frames.length, 64, "The browser check uses all 64 canonical sample frames");
 
+let artworkReads = 0;
 function artworkCall(call) {
+  artworkReads++;
   assert.equal(call.to.toLowerCase(), GENERATION_SPRITE_MANIFEST.registry.toLowerCase());
   const { functionName, args } = decodeFunctionData({ abi: FAMILIES_REGISTRY_ABI, data: call.data });
   let result;
@@ -179,11 +181,18 @@ try {
       .evaluate(node => [Number(node.dataset.x), Number(node.dataset.y)]);
     const short = Math.hypot(at[0] - 404, at[1] - 208);
     assert.ok(short < 45, `The menu waited for the Friend to arrive, not to enter reach (opened ${short.toFixed(1)} away)`);
+    // The Friend's pixels are already in hand by the time the stairs are taken, so the dungeon
+    // must not go back to the chain for them: a read here is a blank canvas for as long as the
+    // round trip takes, on the one transition the player is watching.
+    const readsBeforeDescent = artworkReads;
     await button("Light a torch and descend").click();
     await confirm();
     await child.locator(".deeper-descent").waitFor();
     await gameBounds(child);
     assert.equal(await child.locator(".deeper-sprite").count(), 1, "The selected Friend stands in the dungeon");
+    assert.equal(artworkReads, readsBeforeDescent, "Entering the dungeon re-reads no artwork");
+    assert.equal(await child.locator(".deeper-sprite").getAttribute("aria-label"), `Rare Friend #7730`,
+      "and the Friend is drawn on the first frame of the dungeon, not after a fetch");
 
     // A runtime menu sets `paused`: descent choices must lock and held movement must stop.
     const descendIsDisabled = async () => child.getByRole("button", { name: /^Descend/ }).isDisabled();

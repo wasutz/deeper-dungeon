@@ -19,6 +19,7 @@ import {
 } from "./items.js";
 import { INTERACTIONS, SPAWN, SURFACE } from "./world.js";
 import { Descent, ROOM_REVEAL_MS, type DescentPhase } from "./descent.js";
+import { prefetchFriendSprites } from "./sprite.js";
 // No SDK stylesheet imports. The runner already supplies frame.css and runtime.css to this
 // document, and the cavern palette replaces world-view.css and ui.css wholesale rather than
 // loading them to override nearly every rule -- see the world-view block in style.css.
@@ -216,6 +217,8 @@ export default function Deeper({ friendId, client, paused }: GameComponentProps)
   useEffect(() => {
     const version = ++epoch.current;
     sound.current = createFriendSoundKit({ muted: mutePreference.current });
+    // Read the artwork now, while the Friend is still on the surface, so the dungeon has it.
+    prefetchFriendSprites(friendId);
     setSnapshot(null); setBacked(false); setMenu(null); setRun(null); setPhase("choice"); setSettlement(null); setUnsettled(null);
     setHistory([]); setTotals(NO_TOTALS); setVerifying(null); setError(""); setMessage(""); setBusy(false);
     setStock({}); setLoadout([]); setPurse(0n); setPeeked(null); setTally(NO_TALLY);
