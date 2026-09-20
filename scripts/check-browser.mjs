@@ -381,7 +381,14 @@ try {
     assert.match(await child.locator(".rf-frame-menu").textContent(), /Best depth/, "and returns to the session view");
     await button("Close Fair play").click();
     await child.getByRole("button", { name: /^Menu/ }).click();
-    assert.equal(await child.getByLabel("Reduce motion").isChecked(), true, "Reduced motion is honoured from the OS preference");
+    const motion = child.getByLabel("Reduce motion");
+    assert.equal(await motion.isChecked(), true, "Reduced motion is honoured from the OS preference");
+    // Turning motion back on has to reach the stylesheet and not only the timings. The reveal
+    // below runs with the OS preference still set to reduce, so it moves at all only if this
+    // toggle -- not the media query -- is what the animations are keyed off.
+    await motion.uncheck();
+    assert.equal(await child.locator(".deeper-game[data-motion='full']").count(), 1,
+      "The motion toggle drives the stylesheet over the OS preference");
     const sound = child.getByLabel("Sound");
     assert.equal(await sound.isChecked(), true, "Sound is on by default");
     await sound.uncheck();
@@ -389,15 +396,17 @@ try {
     await sound.check();
     assert.equal(await sound.isChecked(), true);
     await button("Room odds").click();
-    assert.match(await child.locator(".rf-frame-menu").textContent(), /9\.4% edge/);
+    const odds = await child.locator(".rf-frame-menu").textContent();
+    assert.match(odds, /9\.4% edge/, "The stopping problem is priced");
+    assert.match(odds, /5\.65% edge/, "and so is the game as played, curio drops included");
     await gameBounds(child);
     await button("Close Room odds").click();
 
-    // Everything above ran with the motion preference set; the reveal itself only exists without
-    // it. The sweep is handed the roll the room is about to be read at, so the mark it leaves
-    // behind has nowhere to jump to -- a rest position that disagrees with the roll warps across
-    // the bar the moment the room opens.
-    await page.emulateMedia({ reducedMotion: "no-preference" });
+    // Everything above ran with motion reduced; the reveal itself only exists once it is turned
+    // back on, which the settings toggle did above with the OS preference left as it was. The
+    // sweep is handed the roll the room is about to be read at, so the mark it leaves behind has
+    // nowhere to jump to -- a rest position that disagrees with the roll warps across the bar the
+    // moment the room opens.
     await enterDungeon();
     await child.getByRole("button", { name: /and descend/ }).click();
     await confirmIfAsked();

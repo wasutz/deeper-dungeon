@@ -10,7 +10,7 @@ import { maximumPrize, type GameSnapshot } from "@rarefriends/friendsdk/game";
 import { createFriendSoundKit, type FriendSoundCue, type FriendSoundKit } from "@rarefriends/friendsdk/sounds";
 import { createRunNonce, drawRoom, sha256Hex } from "./fairness.js";
 import {
-  enterRoom, FAIRNESS, LEDGER_NOTE, MAX_DEPTH, oddsFor, peekRoom, potFor, rerollRoom, ropeShare,
+  dropTags, enterRoom, FAIRNESS, LEDGER_NOTE, MAX_DEPTH, oddsFor, peekRoom, potFor, rerollRoom, ropeShare,
   ROOMS, tierStep, type Intent, type Room, type RoomKind,
 } from "./rules.js";
 import {
@@ -194,7 +194,10 @@ export default function Deeper({ friendId, client, paused }: GameComponentProps)
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [muted, setMuted] = useState(false);
-  const [reducedMotion, setReducedMotion] = useState(false);
+  // Seeded from the OS on the first render rather than in an effect: a frame of movement is
+  // exactly what a player who asked for none should never see.
+  const [reducedMotion, setReducedMotion] = useState(
+    () => window.matchMedia("(prefers-reduced-motion: reduce)").matches);
   const [stock, setStock] = useState<Stock>({});
   const [loadout, setLoadout] = useState<Carried>([]);
   const [purse, setPurse] = useState(0n);
@@ -616,7 +619,8 @@ export default function Deeper({ friendId, client, paused }: GameComponentProps)
     playId: source.playId, rooms: source.rooms, carried: source.carried,
   });
 
-  return <section className="deeper-game" aria-label={definition.name} aria-busy={busy}>
+  return <section className="deeper-game" data-motion={reducedMotion ? "reduce" : "full"}
+    aria-label={definition.name} aria-busy={busy}>
     {/* Steering by hand is the player changing their mind: the walk they queued stops being what
         they want the moment they take the controls back. */}
     <div className="deeper-world" ref={world} inert={worldPaused || undefined} onPointerDown={onWorldPointer}
@@ -755,6 +759,9 @@ export default function Deeper({ friendId, client, paused }: GameComponentProps)
         <p>Optimal stopping banks <b>0.906 RF</b> of simulated pot per {rf(definition.price)} torch — a 9.4% edge — and
           runs bust 55.4% of the time. The cache the ledger actually settles each torch into is worth <b>0.912 RF</b> on
           average, an 8.8% edge.</p>
+        <p>Both price the bank-or-descend decision on its own. Counting the curio an empty room leaves one time in
+          five, the pot layer as it is actually played returns <b>0.944 RF</b> a torch — a <b>5.65% edge</b>, the one
+          to judge the game by.</p>
       </> : menu === "proof" && verifying ? <>
         <p>{FAIRNESS.note}</p>
         <p className="deeper-note"><code>{FAIRNESS.roomDraw}</code></p>
@@ -784,14 +791,16 @@ export default function Deeper({ friendId, client, paused }: GameComponentProps)
         </>}
         {verifying.rooms.some(room => room.drop) && <>
           <p>What an empty room leaves is two more draws off the same nonce: one decides whether,
-            one decides which.</p>
+            one decides which. A room that got there on a Lucky Charm draws its pair off that reroll, under
+            the <code>reroll-</code> tags.</p>
           <table className="deeper-table">
-            <thead><tr><th>Room</th><th>sha256(…:drop)</th><th>Roll</th><th>sha256(…:drop-item)</th><th>Left behind</th></tr></thead>
+            <thead><tr><th>Room</th><th>sha256(…:gate tag)</th><th>Roll</th><th>sha256(…:pick tag)</th><th>Left behind</th></tr></thead>
             <tbody>{verifying.rooms.filter(room => room.drop).map(room => {
-              const gate = shown && drawRoom(shown.nonce, shown.playId, room.depth, "drop");
-              const pick = shown && drawRoom(shown.nonce, shown.playId, room.depth, "drop-item");
+              const tags = dropTags(room);
+              const gate = shown && drawRoom(shown.nonce, shown.playId, room.depth, tags.gate);
+              const pick = shown && drawRoom(shown.nonce, shown.playId, room.depth, tags.pick);
               return <tr key={room.depth}>
-                <td>{room.depth}</td>
+                <td>{room.depth}<small> · {tags.gate}</small></td>
                 <td className="deeper-hash">{gate ? `${gate.hash.slice(0, 12)}…` : "held"}</td>
                 <td>{gate ? `${gate.roll} < ${ITEM_RULES.dropChanceBps}` : "—"}</td>
                 <td className="deeper-hash">{pick ? `${pick.hash.slice(0, 12)}…` : "held"}</td>

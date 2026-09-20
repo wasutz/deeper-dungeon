@@ -24,8 +24,9 @@ await build({
   entryPoints: [game("fairness.ts"), game("rules.ts"), game("items.ts")],
   bundle: true, format: "esm", platform: "neutral", target: "es2022", outdir: directory, logLevel: "error",
 });
-const { enterRoom, rerollRoom, oddsFor, MAX_DEPTH } = await import(join(directory, "rules.js"));
-const { itemFor } = await import(join(directory, "items.js"));
+const { dropTags, enterRoom, rerollRoom, oddsFor, MAX_DEPTH } = await import(join(directory, "rules.js"));
+const { drawRoom } = await import(join(directory, "fairness.js"));
+const { ITEM_RULES, dropFor, itemFor } = await import(join(directory, "items.js"));
 test.after(() => rm(directory, { recursive: true, force: true }));
 
 const verify = async args => (await run(process.execPath, [script, ...args])).stdout;
@@ -102,6 +103,46 @@ test("the verifier reproduces every room the game resolves, bare and under a Gre
         }
       }
     }
+  }
+});
+
+test("a drop is printed under the tag it was drawn with, bare or after a reroll", async () => {
+  // The Verify panel recomputes the drop pair from the nonce to print it, so it has to pick the
+  // same tags the draw used. A rerolled room's drop hangs off the reroll: assume the bare tags and
+  // the panel prints a digest and a roll from a draw that did not leave the curio beside them, and
+  // contradicts the verifier it tells the reader to run.
+  const play = 1n;
+  const bare = [];
+  const rerolled = [];
+  for (let index = 0; index < 20_000 && (bare.length < 2 || rerolled.length < 2); index++) {
+    const nonce = index.toString(16).padStart(16, "0");
+    for (let depth = 1; depth <= MAX_DEPTH; depth++) {
+      const room = enterRoom(nonce, play, depth, 0);
+      if (room.drop && bare.length < 2) { bare.push({ nonce, depth, room, prefix: "" }); break; }
+      if (room.natural !== "trap" || rerolled.length >= 2) continue;
+      const after = rerollRoom(room, nonce, play, 0, ["lucky-charm"]);
+      if (after.drop) { rerolled.push({ nonce, depth, room: after, prefix: "reroll-" }); break; }
+    }
+  }
+  assert.equal(bare.length, 2, "found rooms that left a curio on their first draw");
+  assert.equal(rerolled.length, 2, "found rooms that left a curio after a Lucky Charm reroll");
+
+  for (const { nonce, depth, room, prefix } of [...bare, ...rerolled]) {
+    const tags = dropTags(room);
+    assert.deepEqual(tags, { gate: `${prefix}drop`, pick: `${prefix}drop-item` }, `depth ${depth} tags`);
+
+    const gate = drawRoom(nonce, play, depth, tags.gate);
+    const pick = drawRoom(nonce, play, depth, tags.pick);
+    assert.ok(gate.roll < ITEM_RULES.dropChanceBps,
+      `depth ${depth} prints a gate roll that actually opened the gate`);
+    assert.equal(dropFor(pick), room.drop, `depth ${depth} prints the pick that named the curio it left`);
+
+    // The verifier derives the same two draws from node:crypto, so agreeing with it is the check.
+    const row = parse(await verify(["--nonce", nonce, "--play", String(play)])).find(one => one.depth === depth);
+    const printed = prefix ? row.rerollDrop : row.drop;
+    assert.equal(printed.roll, gate.roll, `depth ${depth} gate roll matches the verifier`);
+    assert.equal(printed.hash, gate.hash.slice(0, printed.hash.length), `depth ${depth} gate digest matches the verifier`);
+    assert.equal(printed.item, itemFor(room.drop).name, `depth ${depth} curio matches the verifier`);
   }
 });
 
