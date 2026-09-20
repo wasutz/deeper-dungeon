@@ -65,12 +65,22 @@ export const ropeShare = (pot: bigint) => (pot * BigInt(ITEM_RULES.ropeShareBps)
  * price never charged for.
  */
 function dropFrom(
-  nonce: string, playId: bigint, depth: number, kind: RoomKind, natural: RoomKind, prefix: string,
+  nonce: string, playId: bigint, depth: number, kind: RoomKind, natural: RoomKind, reroll: RoomDraw | null,
 ): ItemId | null {
   if (kind !== "empty" || natural !== "empty") return null;
-  const gate = drawRoom(nonce, playId, depth, `${prefix}drop`);
+  const tags = dropTags({ reroll });
+  const gate = drawRoom(nonce, playId, depth, tags.gate);
   if (gate.roll >= ITEM_RULES.dropChanceBps) return null;
-  return dropFor(drawRoom(nonce, playId, depth, `${prefix}drop-item`));
+  return dropFor(drawRoom(nonce, playId, depth, tags.pick));
+}
+
+/**
+ * The two tags a room's drop was drawn under. A rerolled room's drop hangs off the reroll, so
+ * anything recomputing the pair to display it has to ask here rather than assume the bare tags.
+ */
+export function dropTags(room: Pick<Room, "reroll">) {
+  const prefix = room.reroll ? "reroll-" : "";
+  return { gate: `${prefix}drop`, pick: `${prefix}drop-item` } as const;
 }
 
 const classify = (roll: number, odds: RoomOdds): RoomKind =>
@@ -100,7 +110,7 @@ export function enterRoom(
     if (natural === "trap") kind = "empty";
   }
 
-  const drop = dropFrom(nonce, playId, depth, kind, natural, "");
+  const drop = dropFrom(nonce, playId, depth, kind, natural, null);
   const step = tierStep(carried);
   return {
     depth, kind, draw, natural, used, reroll: null, drop,
@@ -118,7 +128,7 @@ export function rerollRoom(room: Room, nonce: string, playId: bigint, tier: numb
   const after = spend(carried, "lucky-charm");
   return {
     ...room, kind, reroll, used: [...room.used, "lucky-charm"],
-    drop: dropFrom(nonce, playId, room.depth, kind, kind, "reroll-"),
+    drop: dropFrom(nonce, playId, room.depth, kind, kind, reroll),
     tier: kind === "loot" ? Math.min(tier + tierStep(after), MAX_DEPTH) : tier,
   };
 }

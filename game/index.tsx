@@ -10,7 +10,7 @@ import { maximumPrize, type GameSnapshot } from "@rarefriends/friendsdk/game";
 import { createFriendSoundKit, type FriendSoundCue, type FriendSoundKit } from "@rarefriends/friendsdk/sounds";
 import { createRunNonce, drawRoom, sha256Hex } from "./fairness.js";
 import {
-  enterRoom, FAIRNESS, LEDGER_NOTE, MAX_DEPTH, oddsFor, peekRoom, potFor, rerollRoom, ropeShare,
+  dropTags, enterRoom, FAIRNESS, LEDGER_NOTE, MAX_DEPTH, oddsFor, peekRoom, potFor, rerollRoom, ropeShare,
   ROOMS, tierStep, type Intent, type Room, type RoomKind,
 } from "./rules.js";
 import {
@@ -784,14 +784,16 @@ export default function Deeper({ friendId, client, paused }: GameComponentProps)
         </>}
         {verifying.rooms.some(room => room.drop) && <>
           <p>What an empty room leaves is two more draws off the same nonce: one decides whether,
-            one decides which.</p>
+            one decides which. A room that got there on a Lucky Charm draws its pair off that reroll, under
+            the <code>reroll-</code> tags.</p>
           <table className="deeper-table">
-            <thead><tr><th>Room</th><th>sha256(…:drop)</th><th>Roll</th><th>sha256(…:drop-item)</th><th>Left behind</th></tr></thead>
+            <thead><tr><th>Room</th><th>sha256(…:gate tag)</th><th>Roll</th><th>sha256(…:pick tag)</th><th>Left behind</th></tr></thead>
             <tbody>{verifying.rooms.filter(room => room.drop).map(room => {
-              const gate = shown && drawRoom(shown.nonce, shown.playId, room.depth, "drop");
-              const pick = shown && drawRoom(shown.nonce, shown.playId, room.depth, "drop-item");
+              const tags = dropTags(room);
+              const gate = shown && drawRoom(shown.nonce, shown.playId, room.depth, tags.gate);
+              const pick = shown && drawRoom(shown.nonce, shown.playId, room.depth, tags.pick);
               return <tr key={room.depth}>
-                <td>{room.depth}</td>
+                <td>{room.depth}<small> · {tags.gate}</small></td>
                 <td className="deeper-hash">{gate ? `${gate.hash.slice(0, 12)}…` : "held"}</td>
                 <td>{gate ? `${gate.roll} < ${ITEM_RULES.dropChanceBps}` : "—"}</td>
                 <td className="deeper-hash">{pick ? `${pick.hash.slice(0, 12)}…` : "held"}</td>
