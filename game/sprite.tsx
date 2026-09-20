@@ -15,8 +15,11 @@ export function FriendSprite({ friendId, facing = "down", walking = false, reduc
 }) {
   const canvas = useRef<HTMLCanvasElement>(null);
   const [sprites, setSprites] = useState<GenerationSprites | null>(null);
+  // The render loop reads the latest props without being torn down and rebuilt for each one.
+  // Written in an effect rather than during render: a render may be discarded, and the loop that
+  // survives it would go on drawing from the props of a frame that never reached the screen.
   const live = useRef({ facing, walking, reducedMotion });
-  live.current = { facing, walking, reducedMotion };
+  useEffect(() => { live.current = { facing, walking, reducedMotion }; }, [facing, walking, reducedMotion]);
 
   useEffect(() => {
     let active = true;

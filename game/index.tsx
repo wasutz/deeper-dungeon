@@ -213,8 +213,11 @@ export default function Deeper({ friendId, client, paused }: GameComponentProps)
       const outcome = settled.outcomeId === null ? null : definition.outcomes[settled.outcomeId - 1];
       const result: Settlement | null = outcome ? { name: outcome.name, reward: outcome.reward } : null;
       setSettlement(result);
+      // Numbered here rather than inside the updater: React may call an updater more than once,
+      // and a run number that counts re-renders is a run number that skips.
+      const number = ++runCount.current;
       setHistory(previous => [{
-        number: ++runCount.current, depth: finished.depth, tier: finished.tier, pot, banked,
+        number, depth: finished.depth, tier: finished.tier, pot, banked,
         settlement: result, playId: finished.playId, nonce: finished.nonce, commitment: finished.commitment,
         rooms: finished.rooms, carried: carriedInto,
       }, ...previous].slice(0, 20));
@@ -251,9 +254,12 @@ export default function Deeper({ friendId, client, paused }: GameComponentProps)
   const descend = useCallback((intent: Intent = {}) => {
     if (!run || phase !== "choice" || busy || paused || run.depth >= MAX_DEPTH) return;
     setPhase("entering");
-    setPeeked(null);
     void sound.current?.unlock();
     sound.current?.play("anticipation");
+    // The peek is cleared by the room that consumes it, not by the attempt to enter one. A pause
+    // rewinds a held descent to the choice, and a read the player already paid a Lantern for has
+    // to survive that -- otherwise the charge is gone, the room is unentered, and its committed
+    // draw gets counted a second time when the descent is made again.
     const resolve = () => {
       timer.current = null;
       const drawn = enterRoom(run.nonce, run.playId, run.depth + 1, run.tier, run.carried, intent);
@@ -265,6 +271,7 @@ export default function Deeper({ friendId, client, paused }: GameComponentProps)
         setTally(current => observed(current, room.depth, run.carried, room.natural));
       }
       const next: Run = { ...run, rooms: [...run.rooms, room], depth: room.depth, tier: room.tier, carried };
+      setPeeked(null);
       setRun(next);
       settleRoom(next, room);
     };
@@ -273,8 +280,10 @@ export default function Deeper({ friendId, client, paused }: GameComponentProps)
   }, [run, phase, busy, paused, reducedMotion, peeked, settleRoom]);
 
   const peek = useCallback(() => {
-    if (!run || phase !== "choice" || busy || paused || !holds(run.carried, "lantern")) return;
-    const depth = Math.min(run.depth + 1, MAX_DEPTH);
+    // The floor guard is the same one `descend` keeps: clamping instead would re-read the room
+    // already entered, spending the Lantern on it and counting its draw twice.
+    if (!run || phase !== "choice" || busy || paused || run.depth >= MAX_DEPTH || !holds(run.carried, "lantern")) return;
+    const depth = run.depth + 1;
     const kind = peekRoom(run.nonce, run.playId, depth, run.carried);
     // Counted here rather than on entry. A peek that talks you out of descending would otherwise
     // drop its own draw from the tally, and a draw included only when the player liked the look of

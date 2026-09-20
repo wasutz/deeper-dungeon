@@ -111,6 +111,9 @@ export function Descent({ friendId, depth, tier, rooms, phase, pot, carried, pee
   reducedMotion, bestDepth, settlement, onDescend, onPeek, onBank, onRope, onCharm, onAccept,
   onVerify, onLedger, onRetrySettle, onAgain, onLeave }: DescentProps) {
   const last = rooms[rooms.length - 1] ?? null;
+  // A curio is spent by the room it was taken into whether or not it changed anything, so what it
+  // was spent on and what it overrode are two different claims. Only the second may say "overridden".
+  const spent = last?.used.map(id => itemFor(id).name).join(" and ") ?? "";
   const atFloor = depth >= MAX_DEPTH;
   const nextDepth = Math.min(depth + 1, MAX_DEPTH);
   const next = oddsFor(nextDepth, carried);
@@ -199,7 +202,9 @@ export function Descent({ friendId, depth, tier, rooms, phase, pot, carried, pee
       <span className="deeper-draw-foot">
         <span className="deeper-draw-hash">
           <b>{(last.reroll ?? last.draw).roll}</b> / 10000 · sha256 {(last.reroll ?? last.draw).hash.slice(0, 8)}…
-          {last.used.length > 0 && <em> · {VERDICT[last.natural].toLowerCase()} overridden by {last.used.map(id => itemFor(id).name).join(" and ")}</em>}
+          {last.used.length > 0 && (last.kind === last.natural
+            ? <em> · {spent} spent, the draw stood</em>
+            : <em> · {VERDICT[last.natural].toLowerCase()} overridden by {spent}</em>)}
         </span>
         <button type="button" className="deeper-link" onClick={onVerify}>Verify</button>
       </span>

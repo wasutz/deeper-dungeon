@@ -20,8 +20,11 @@ if (!existsSync(sdk)) {
 // step most likely to blow a CI or deploy install budget.
 const environment = { ...process.env, PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1" };
 
+// `ci`, not `install`: the SDK ships its own lockfile, and this runs on every deploy. Resolving
+// its tree afresh each time would make the build non-reproducible and put an unpinned dependency
+// graph between the pinned SDK commit and what actually ships.
 const npm = process.platform === "win32" ? "npm.cmd" : "npm";
-for (const args of [["install", "--no-audit", "--no-fund"], ["run", "build"]]) {
+for (const args of [["ci", "--no-audit", "--no-fund"], ["run", "build"]]) {
   const { status } = spawnSync(npm, ["--prefix", sdk, ...args], { stdio: "inherit", env: environment });
   if (status !== 0) process.exit(status ?? 1);
 }

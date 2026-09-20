@@ -164,6 +164,10 @@ button.deeper-chip:hover, button.deeper-chip:focus-visible { border-color: var(-
   position: absolute;
   inset: 0;
   display: grid;
+  /* The single column is pinned rather than left implicit: an `auto` track sizes to max-content,
+     so one long nowrap caption in the draw readout would widen every row under it and push the
+     choice buttons out of the frame. */
+  grid-template-columns: minmax(0, 1fr);
   grid-template-rows: auto minmax(0, 1fr) auto auto auto;
   gap: 6px;
   /* The SDK frame floats its wallet toolbar over the bottom strip; keep controls clear of it. */
@@ -302,6 +306,11 @@ button.deeper-chip:hover, button.deeper-chip:focus-visible { border-color: var(-
 
 .deeper-draw {
   display: grid;
+  /* Both are load-bearing for the ellipsis below. A grid item defaults to `min-width: auto`, and
+     the descent sets `white-space: nowrap`, so this row's min-content is its longest caption in
+     full -- it would widen the whole descent rather than truncate. */
+  grid-template-columns: minmax(0, 1fr);
+  min-width: 0;
   gap: 3px;
   font-size: 10px;
   color: #a08a6c;
